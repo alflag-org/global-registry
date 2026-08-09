@@ -1,0 +1,3 @@
+import type { Resource } from '../../domain/models/global-registry';
+
+export type ForbiddenDomainFixture = Resource;

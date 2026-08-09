@@ -1,0 +1,54 @@
+[settings]
+lockfile = true
+
+[tools]
+node = "24.18.0"
+"npm:pnpm" = "11.12.0"
+
+[tasks.bootstrap]
+description = "Install locked dependencies, browser support, and Worker binding types"
+run = ["pnpm install --frozen-lockfile", "pnpm browser:install", "pnpm types"]
+
+[tasks.check]
+description = "Run all static checks and tests"
+run = "pnpm check"
+
+[tasks.test]
+description = "Run the test suite"
+run = "pnpm test"
+
+[tasks.dev]
+description = "Start the local Worker development server"
+run = "pnpm dev"
+
+[tasks.migrate-local]
+description = "Apply D1 migrations to the local database"
+run = "pnpm db:migrate:local"
+
+[tasks.migrate-remote]
+description = "Apply D1 migrations to the configured remote database"
+run = "pnpm db:migrate:remote"
+
+[tasks.smoke]
+description = "Validate a fresh local D1 database"
+run = "pnpm smoke:local"
+
+[tasks.export-sql]
+description = "Export an explicitly selected database as SQL"
+run = "pnpm export:sql"
+
+[tasks.deploy-dry-run]
+description = "Validate the Worker deployment without publishing it"
+run = "pnpm deploy:dry-run"
+
+[tasks.deploy]
+description = "Deploy the configured Worker after operator review"
+run = "pnpm deploy"
+
+[tasks.deploy-dry-run-local]
+description = "Build an inert local deployment bundle without Cloudflare resources"
+run = "pnpm deploy:dry-run:local"
+
+[tasks.startup-check]
+description = "Profile local Worker startup"
+run = "pnpm startup:check"

@@ -1,0 +1,3 @@
+import type { ExportPersistencePort } from '../../application/ports';
+
+export type ValidPortFixture = ExportPersistencePort;

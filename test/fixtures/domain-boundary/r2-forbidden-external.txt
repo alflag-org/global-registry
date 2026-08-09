@@ -1,0 +1,3 @@
+import 'hono';
+
+export const forbiddenExternalFixture = true;

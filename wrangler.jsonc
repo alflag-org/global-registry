@@ -1,0 +1,105 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unset",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "ENVIRONMENT": "production",
+    "ALLOW_LOCAL_AUTH": "false",
+    "ACCESS_TEAM_DOMAIN": "unset",
+    "ACCESS_AUD": "unset",
+    "LOCAL_AUTH_SECRET": "unset",
+    "LOCAL_ACTOR_IDENTITY": "unset",
+    "BACKUP_ACTOR_ID": "unset",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "EXPORTS_BUCKET",
+      "bucket_name": "local-exports",
+    },
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "EVENT_QUEUE",
+        "queue": "local-event-queue",
+      },
+    ],
+    "consumers": [
+      {
+        "queue": "local-event-queue",
+        "max_batch_size": 20,
+        "max_batch_timeout": 5,
+        "max_retries": 5,
+        "visibility_timeout_ms": 300000,
+        "dead_letter_queue": "local-event-queue-dlq",
+        "retry_delay": 300,
+      },
+    ],
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": false,
+    },
+    "traces": {
+      "enabled": false,
+      "persist": false,
+    },
+  },
+  "env": {
+    "development": {
+      "vars": {
+        "ENVIRONMENT": "development",
+        "ALLOW_LOCAL_AUTH": "true",
+        "ACCESS_TEAM_DOMAIN": "unset",
+        "ACCESS_AUD": "unset",
+        "LOCAL_AUTH_SECRET": "unset",
+        "LOCAL_ACTOR_IDENTITY": "access:local-admin",
+        "BACKUP_ACTOR_ID": "unset",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "migrations_dir": "migrations",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "EXPORTS_BUCKET",
+          "bucket_name": "local-exports",
+        },
+      ],
+      "queues": {
+        "producers": [
+          {
+            "binding": "EVENT_QUEUE",
+            "queue": "local-event-queue",
+          },
+        ],
+        "consumers": [
+          {
+            "queue": "local-event-queue",
+            "max_batch_size": 20,
+            "max_batch_timeout": 5,
+            "max_retries": 5,
+            "visibility_timeout_ms": 300000,
+            "dead_letter_queue": "local-event-queue-dlq",
+            "retry_delay": 300,
+          },
+        ],
+      },
+    },
+  },
+}

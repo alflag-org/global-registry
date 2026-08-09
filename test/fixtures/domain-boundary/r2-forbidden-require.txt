@@ -1,0 +1,3 @@
+const forbiddenRequire = require('../../api/app');
+
+export { forbiddenRequire };

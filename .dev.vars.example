@@ -1,0 +1,8 @@
+# Development-only values. Copying this file leaves local auth unusable; do not expose this Worker outside loopback.
+ENVIRONMENT=development
+ALLOW_LOCAL_AUTH=true
+LOCAL_ACTOR_IDENTITY=access:local-admin
+ACCESS_TEAM_DOMAIN=unset
+ACCESS_AUD=unset
+LOCAL_AUTH_SECRET=unset
+BACKUP_ACTOR_ID=unset

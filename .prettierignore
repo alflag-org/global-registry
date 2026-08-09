@@ -1,0 +1,7 @@
+DESIGN.md
+pnpm-lock.yaml
+worker-configuration.d.ts
+.wrangler/
+node_modules/
+coverage/
+.playwright-cli/
