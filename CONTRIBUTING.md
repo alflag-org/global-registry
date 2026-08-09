@@ -51,6 +51,8 @@ pnpm check:local-auth
 
 Run `pnpm browser:install` before the local-auth check when the locked browser is not installed. The deployment dry run uses the inert shared configuration and does not publish a Worker.
 
+Pull-request CI runs the canonical checks, a fresh-D1 smoke test, the inert deployment dry run, and `git diff --check`. The separate Security workflow runs dependency advisory and registry-signature checks plus a Trivy repository scan on every `master` push, on manual dispatch, and each Monday at 03:23 UTC.
+
 ## Forward-only migrations
 
 `migrations/0001_initial.sql` is frozen. Do not edit it. Add schema changes as consecutively numbered files such as `0002_add_example.sql`; Wrangler and D1 own the migration ledger.

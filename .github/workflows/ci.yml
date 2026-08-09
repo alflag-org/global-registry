@@ -38,3 +38,12 @@ jobs:
 
       - name: Run canonical checks
         run: mise run check
+
+      - name: Smoke-test a fresh D1 database
+        run: mise run smoke
+
+      - name: Validate the deployment bundle
+        run: mise run deploy-dry-run-local
+
+      - name: Check patch whitespace
+        run: git diff --check

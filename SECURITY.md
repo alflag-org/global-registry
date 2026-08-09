@@ -24,6 +24,8 @@ OpenAPI is served only after authentication. `/docs` uses repository-hosted asse
 
 These controls do not replace deployment acceptance. Operators must validate the target Access policy and cookie behavior and exercise D1 concurrency plus Queue/R2 partial-failure recovery in the deployed environment.
 
+The Security workflow runs on every `master` push, on manual dispatch, and each Monday at 03:23 UTC. It checks dependency advisories and package registry signatures, then uses Trivy to detect high- and critical-severity repository vulnerabilities, exposed secrets, and configuration problems. Action references are pinned to immutable commits.
+
 ## Private reporting
 
 Report suspected vulnerabilities privately to the repository maintainers before public disclosure. Include a concise reproduction, the affected route or component, expected and observed behavior, and only the evidence needed to reproduce it. Do not include credential values, private keys, Access assertions, raw production exports, or personal data. Do not use a public issue for an undisclosed vulnerability.
