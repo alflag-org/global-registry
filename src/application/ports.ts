@@ -38,6 +38,7 @@ import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
   CompleteOperationCommand,
+  ForceCancelOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -402,6 +403,7 @@ export interface RegistryRepository {
   transition(input: TransitionResourceCommand): Promise<Resource>;
   completeOperation(input: CompleteOperationCommand): Promise<Operation>;
   updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation>;
+  forceCancelOperation(input: ForceCancelOperationCommand): Promise<Operation>;
   updateOperationStep(input: ChangeOperationStepCommand): Promise<OperationStep>;
 
   listResourceEvents(resourceKey: string, limit?: number): Promise<AuditEvent[]>;

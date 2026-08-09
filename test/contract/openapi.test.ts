@@ -66,6 +66,12 @@ describe('HTTP contract', () => {
     expect(document.info.title).toBe('Global Registry API');
     expect(document.paths['/api/v1/auth/session']).toBeDefined();
     expect(document.paths['/api/v1/operations/{id}/complete']).toBeDefined();
+    expect(document.paths['/api/v1/operations/{id}/force-cancel']).toMatchObject({
+      post: {
+        operationId: 'forceCancelOperation',
+        'x-required-roles': ['admin'],
+      },
+    });
     expect(document.components.securitySchemes).toMatchObject({
       CloudflareAccess: {
         type: 'apiKey',

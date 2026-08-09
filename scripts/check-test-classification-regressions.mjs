@@ -160,11 +160,11 @@ try {
   }
   if (
     positive.effectiveUnitFiles.length !== 16 ||
-    positive.effectiveWorkerFiles.length !== 10 ||
+    positive.effectiveWorkerFiles.length !== 11 ||
     !positive.nodeConfigIsWorkerFree
   ) {
     throw new Error(
-      `Positive classification fixture did not produce the exact 16/10 Worker-free partition with all supported extensions: violations=${positive.violations.join('; ')}, unit=${positive.effectiveUnitFiles.length}, worker=${positive.effectiveWorkerFiles.length}, workerFree=${positive.nodeConfigIsWorkerFree}.`,
+      `Positive classification fixture did not produce the exact 16/11 Worker-free partition with all supported extensions: violations=${positive.violations.join('; ')}, unit=${positive.effectiveUnitFiles.length}, worker=${positive.effectiveWorkerFiles.length}, workerFree=${positive.nodeConfigIsWorkerFree}.`,
     );
   }
 
@@ -184,7 +184,7 @@ try {
 }
 
 globalThis.console.log(
-  `Test classification regression fixtures passed: exact 16/10 extension-aware partition accepted; 4 Node and 4 Worker extension-selection files were intentionally executed and failed; ${cases.length} configuration and import-graph cases rejected before execution.`,
+  `Test classification regression fixtures passed: exact 16/11 extension-aware partition accepted; 4 Node and 4 Worker extension-selection files were intentionally executed and failed; ${cases.length} configuration and import-graph cases rejected before execution.`,
 );
 
 function replaceIncludes(source, entries) {
