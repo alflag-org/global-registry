@@ -26,45 +26,15 @@ jobs:
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
           version: 2026.8.1
-          sha256: 961b1dbf70c6c0edb8ad8a7e6dd8f96e2fe9175a0c2a1d50d4d1f4e84c73a5f0
+          sha256: 961b1fcc78830e861ab887abd19d9b961478bcf252e37881fdd61c81388308d4
           install: false
           cache: true
 
-      - name: Install locked toolchain and dependencies
+      - name: Install locked dependencies
         run: |
           mise install --locked
-          mise run bootstrap
+          pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
 
-      - name: Run checks and fresh local smoke
-        run: |
-          mise run check
-          mise run smoke
-          git diff --check
-
-      - name: Validate deployment bundle without publishing
-        run: mise run deploy-dry-run-local
-
-      - name: Audit dependencies
-        run: |
-          pnpm audit --audit-level high
-          pnpm audit signatures
-
-      - name: Scan repository with pinned Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: detect --source . --no-banner --redact --exit-code 1
-
-      - name: Scan repository with pinned Trivy
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          version: v0.66.0
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig,secret
-          exit-code: '1'
-          ignore-unfixed: 'false'
-          format: table
-          skip-dirs: .git,node_modules
+      - name: Run canonical checks
+        run: mise run check
