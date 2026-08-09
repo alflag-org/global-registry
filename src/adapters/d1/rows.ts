@@ -60,6 +60,7 @@ export function mapResource(row: ResourceRow): Resource {
     id: row.id,
     key: row.key,
     kind: row.kind,
+    kindVersion: row.kind_version,
     name: row.name,
     ...optional('profile', profile),
     ...optional('policy', policy),

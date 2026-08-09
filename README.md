@@ -10,6 +10,8 @@ Global Registry is a provider-neutral desired-state registry for resources, prov
 - Provider credentials are represented only by uppercase references such as `PROVIDER_CREDENTIAL`. A reference is not a secret.
 - A provider driver is a stable lowercase identifier such as `aws`, `openstack`, or `example.internal`. Adding one does not require a Global Registry release.
 - Provider configuration and mappings are bounded non-secret JSON. Global Registry preserves them for external adapters but does not interpret provider-specific fields or call provider APIs.
+- A Resource kind definition is an immutable, versioned lifecycle and relationship contract. Resources, profiles, and policies reference an exact definition version.
+- The eight standard Resource kinds keep their strict Core schemas. Extension Resource and profile specifications use bounded, credential-free JSON; their semantic and provider-specific validation belongs in the external adapter. Extension policies contain only the common Core constraints.
 - Production access requires Cloudflare Access and an active Actor mapping. Local authentication is development-only and loopback-only; it must not be exposed through a public bind or tunnel.
 
 The committed `wrangler.jsonc` contains unset deployment values, local simulation names, and disabled workers.dev and preview exposure. Use the operator overlay in [Deployment](docs/deployment.md) for a real environment.

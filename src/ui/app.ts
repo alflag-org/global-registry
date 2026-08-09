@@ -21,6 +21,7 @@ type UiRepository = Pick<
   | 'getActor'
   | 'getOperationDetail'
   | 'getResourceDetail'
+  | 'getResourceKindDefinition'
   | 'listActors'
   | 'listDrifts'
   | 'listEvents'
@@ -100,16 +101,19 @@ async function pageForPath(options: RenderUiPageOptions): Promise<string | null>
         ...(driftCursor === undefined ? {} : { driftCursor }),
       });
       if (detail !== null) {
-        const [allResources, events] = await Promise.all([
+        const [allResources, events, definition] = await Promise.all([
           repository.listResources({ limit: 100 }),
           repository.listResourceEvents(key),
+          repository.getResourceKindDefinition(detail.resource.kind, detail.resource.kindVersion),
         ]);
+        if (definition === null) return null;
         return result(
           renderResourceDetailPage({
             detail,
             allResources,
             events,
             actor,
+            definition,
             query: {
               ...(relationshipCursor === undefined ? {} : { relationshipCursor }),
               ...(driftCursor === undefined ? {} : { driftCursor }),

@@ -4,6 +4,7 @@ export interface PolicyDefinition {
   namespace: string;
   key: string;
   resourceKind: ResourceKind;
+  resourceKindVersion: number;
   spec: JsonObject;
 }
 

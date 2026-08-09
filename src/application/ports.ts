@@ -14,8 +14,13 @@ export {
 } from './limits';
 export type { ProfileSummary } from './profiles';
 export type { PolicySummary } from './policies';
+export type { ResourceKindDefinitionSummary } from './resource-kind-definitions';
 import type { ProfileSummary } from './profiles';
 import type { PolicySummary } from './policies';
+import type {
+  PersistResourceKindDefinitionInput,
+  ResourceKindDefinitionSummary,
+} from './resource-kind-definitions';
 import type { CreateResource, UpdateResource } from '../domain/models/global-registry';
 export type {
   PortableExportChunk,
@@ -55,6 +60,7 @@ import type {
   ProviderBinding,
   ProfileVersion,
   Resource,
+  ResourceKindDefinitionVersion,
   ResourceQuery,
   ResourceRelationship,
 } from '../domain/models/global-registry';
@@ -91,6 +97,7 @@ export interface UpdateProviderInput {
 export interface CreateProfileInput {
   key: string;
   resourceKind: Resource['kind'];
+  resourceKindVersion: number;
   spec: JsonObject;
   actorId: string;
   expectedRevision?: number;
@@ -100,6 +107,7 @@ export interface CreatePolicyInput {
   namespace: string;
   key: string;
   resourceKind: Resource['kind'];
+  resourceKindVersion: number;
   spec: JsonObject;
   actorId: string;
   expectedRevision?: number;
@@ -301,6 +309,22 @@ export interface RegistryRepository {
   getResourceDetail(key: string, query?: ResourceDetailQuery): Promise<ResourceDetail | null>;
   createResource(input: CreateResource): Promise<Resource>;
   updateResource(input: UpdateResource): Promise<Resource>;
+
+  createResourceKindDefinitionVersion(
+    input: PersistResourceKindDefinitionInput,
+  ): Promise<ResourceKindDefinitionVersion>;
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
+  getResourceKindDefinitionSummary(key: string): Promise<ResourceKindDefinitionSummary | null>;
+  updateResourceKindDefinitionStatus(input: {
+    key: string;
+    status: ResourceKindDefinitionVersion['parentStatus'];
+    expectedRevision: number;
+    actorId: string;
+  }): Promise<ResourceKindDefinitionSummary>;
+  listResourceKindDefinitions(limit?: number): Promise<ResourceKindDefinitionSummary[]>;
 
   getProvider(id: string): Promise<Provider | null>;
   listProviders(limit?: number): Promise<Provider[]>;

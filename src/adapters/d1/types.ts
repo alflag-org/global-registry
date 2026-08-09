@@ -6,6 +6,9 @@ import type {
   ResourceKind,
   ResourceLifecycleState,
   RelationshipType,
+  ResourcePlacementMode,
+  ResourceSpecificationMode,
+  VersionParentStatus,
 } from '../../domain/models/global-registry';
 
 export interface ActorRow {
@@ -25,6 +28,7 @@ export interface ResourceRow {
   id: string;
   key: string;
   kind: ResourceKind;
+  kind_version: number;
   name: string;
   profile_key: string | null;
   profile_version: number | null;
@@ -54,9 +58,33 @@ export interface ProviderRow {
   updated_at: string;
 }
 
+export interface ResourceKindDefinitionRow {
+  key: ResourceKind;
+  status: VersionParentStatus;
+  current_version: number;
+  revision: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResourceKindDefinitionVersionRow {
+  kind_key: ResourceKind;
+  version: number;
+  states_json: string;
+  initial_state: ResourceLifecycleState;
+  terminal_states_json: string;
+  transitions_json: string;
+  placement_mode: ResourcePlacementMode;
+  specification_mode: ResourceSpecificationMode;
+  relationship_rules_json: string;
+  created_at: string;
+  created_by: string | null;
+}
+
 export interface ProfileRow {
   key: string;
   resource_kind: ResourceKind;
+  resource_kind_version: number;
   status: 'active' | 'deprecated' | 'retired';
   current_version: number;
   revision: number;
@@ -87,6 +115,7 @@ export interface PolicyVersionRow {
   policy_key: string;
   version: number;
   resource_kind: ResourceKind;
+  resource_kind_version: number;
   spec_json: string;
   created_at: string;
   created_by: string;

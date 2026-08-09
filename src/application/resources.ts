@@ -14,6 +14,7 @@ import type {
   ProviderBinding,
   Resource,
   ResourceKind,
+  ResourceKindDefinitionVersion,
   UpdateResource,
   VersionedReference,
 } from '../domain/models/global-registry';
@@ -28,6 +29,10 @@ import {
 
 interface ResourceStore {
   getResource(key: string): Promise<Resource | null>;
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
   getProfileVersion(key: string, version: number): Promise<ProfileVersion | null>;
   getPolicyVersion(namespace: string, key: string, version: number): Promise<PolicyVersion | null>;
   getBinding(resourceKey: string): Promise<ProviderBinding | null>;
@@ -40,6 +45,7 @@ interface CreateResourceCommand {
   actorId: string;
   key: string;
   kind: ResourceKind;
+  kindVersion: number;
   name: string;
   placement: JsonObject;
   specOverrides: JsonObject;
@@ -60,18 +66,21 @@ export class ResourceService {
   constructor(private readonly store: ResourceStore) {}
 
   async create(input: CreateResourceCommand): Promise<Resource> {
-    const placement = validatePlacement(input.kind, input.placement);
-    await this.validateLocationReference(input.kind, placement);
-    const profile = await this.resolveProfile(input.profile, input.kind, true);
-    const specOverrides = validateResourceSpecOverrides(input.kind, input.specOverrides);
+    const definition = await this.resolveDefinition(input.kind, input.kindVersion, true);
+    const placement = validatePlacement(definition, input.placement);
+    await this.validateLocationReference(definition, placement);
+    const profile = await this.resolveProfile(input.profile, definition, true);
+    const specOverrides = validateResourceSpecOverrides(definition, input.specOverrides);
     const spec = validateResourceSpec(
-      input.kind,
+      definition,
       materializeEffectiveSpec(profile?.spec ?? null, specOverrides),
     );
-    const policy = await this.resolvePolicy(input.policy, true);
+    const policy = await this.resolvePolicy(input.policy, definition, true);
     const candidate = candidateResource({
       key: input.key,
       kind: input.kind,
+      kindVersion: input.kindVersion,
+      initialState: definition.initialState,
       name: input.name,
       placement,
       specOverrides,
@@ -79,11 +88,13 @@ export class ResourceService {
       ...(input.profile === undefined ? {} : { profile: input.profile }),
       ...(input.policy === undefined ? {} : { policy: input.policy }),
     });
-    evaluateSelectedPolicy(candidate, policy);
+    evaluateSelectedPolicy(candidate, policy, definition);
     return this.store.createResource({
       actorId: input.actorId,
       key: input.key,
       kind: input.kind,
+      kindVersion: input.kindVersion,
+      initialState: definition.initialState,
       name: input.name,
       placement,
       specOverrides,
@@ -130,24 +141,26 @@ export class ResourceService {
       );
     }
 
-    const placement = validatePlacement(current.kind, input.placement ?? current.placement);
-    await this.validateLocationReference(current.kind, placement);
+    const definition = await this.resolveDefinition(current.kind, current.kindVersion, false);
+    const placement = validatePlacement(definition, input.placement ?? current.placement);
+    await this.validateLocationReference(definition, placement);
     const profileReference = current.profile;
     const policyReference = current.policy;
-    const profile = await this.resolveProfile(profileReference, current.kind, false);
+    const profile = await this.resolveProfile(profileReference, definition, false);
     const specOverrides = validateResourceSpecOverrides(
-      current.kind,
+      definition,
       input.specOverrides ?? current.specOverrides,
     );
     const spec = validateResourceSpec(
-      current.kind,
+      definition,
       materializeEffectiveSpec(profile?.spec ?? null, specOverrides),
     );
-    const policy = await this.resolvePolicy(policyReference, false);
+    const policy = await this.resolvePolicy(policyReference, definition, false);
     const candidate: Resource = {
       id: current.id,
       key: current.key,
       kind: current.kind,
+      kindVersion: current.kindVersion,
       name: input.name ?? current.name,
       placement,
       specOverrides,
@@ -159,8 +172,8 @@ export class ResourceService {
       ...(profileReference === undefined ? {} : { profile: profileReference }),
       ...(policyReference === undefined ? {} : { policy: policyReference }),
     };
-    evaluateSelectedPolicy(candidate, policy);
-    const boundProviderGuard = await this.validateExistingBinding(candidate, policy);
+    evaluateSelectedPolicy(candidate, policy, definition);
+    const boundProviderGuard = await this.validateExistingBinding(candidate, policy, definition);
     return this.store.updateResource({
       actorId: input.actorId,
       key: current.key,
@@ -177,7 +190,7 @@ export class ResourceService {
 
   private async resolveProfile(
     reference: VersionedReference | undefined,
-    kind: ResourceKind,
+    definition: ResourceKindDefinitionVersion,
     requireActive: boolean,
   ): Promise<ProfileVersion | null> {
     if (reference === undefined) return null;
@@ -185,14 +198,18 @@ export class ResourceService {
     if (profile === null) {
       throw new NotFoundError('Profile version', `${reference.key}@${reference.version}`);
     }
-    if (profile.resourceKind !== kind) {
+    if (
+      profile.resourceKind !== definition.key ||
+      profile.resourceKindVersion !== definition.version
+    ) {
       throw new ValidationError(
         'profile_kind_mismatch',
         'A resource profile must match the resource kind.',
         {
           profileKey: profile.key,
           profileKind: profile.resourceKind,
-          resourceKind: kind,
+          resourceKind: definition.key,
+          resourceKindVersion: definition.version,
         },
       );
     }
@@ -202,12 +219,13 @@ export class ResourceService {
         status: profile.parentStatus,
       });
     }
-    validateResourceSpecOverrides(kind, profile.spec);
+    validateResourceSpecOverrides(definition, profile.spec);
     return profile;
   }
 
   private async resolvePolicy(
     reference: PolicyReference | undefined,
+    definition: ResourceKindDefinitionVersion,
     requireActive: boolean,
   ): Promise<PolicyVersion | null> {
     if (reference === undefined) return null;
@@ -222,6 +240,21 @@ export class ResourceService {
         `${reference.namespace}/${reference.key}@${reference.version}`,
       );
     }
+    if (
+      policy.resourceKind !== definition.key ||
+      policy.resourceKindVersion !== definition.version
+    ) {
+      throw new ValidationError(
+        'policy_kind_mismatch',
+        'A resource policy must match the Resource kind definition version.',
+        {
+          policyKind: policy.resourceKind,
+          policyKindVersion: policy.resourceKindVersion,
+          resourceKind: definition.key,
+          resourceKindVersion: definition.version,
+        },
+      );
+    }
     if (requireActive && policy.parentStatus !== 'active') {
       throw new ConflictError('policy_not_active', 'New references require an active policy.', {
         namespace: policy.namespace,
@@ -233,18 +266,23 @@ export class ResourceService {
   }
 
   private async validateLocationReference(
-    kind: ResourceKind,
+    definition: ResourceKindDefinitionVersion,
     placement: JsonObject,
   ): Promise<void> {
     const locationKey =
       typeof placement.locationKey === 'string' ? placement.locationKey : undefined;
-    if (kind === 'location' || locationKey === undefined) return;
+    if (definition.placementMode === 'root' || locationKey === undefined) return;
     const location = await this.store.getResource(locationKey);
-    if (location === null) throw new NotFoundError('Location resource', locationKey);
-    if (location.kind !== 'location') {
+    if (location === null) throw new NotFoundError('Placement-root Resource', locationKey);
+    const locationDefinition = await this.resolveDefinition(
+      location.kind,
+      location.kindVersion,
+      false,
+    );
+    if (locationDefinition.placementMode !== 'root') {
       throw new ValidationError(
         'placement_location_kind_mismatch',
-        'placement.locationKey must reference a location resource.',
+        'placement.locationKey must reference a placement-root Resource.',
         { locationKey, actualKind: location.kind },
       );
     }
@@ -253,6 +291,7 @@ export class ResourceService {
   private async validateExistingBinding(
     resource: Resource,
     policy: PolicyVersion | null,
+    definition: ResourceKindDefinitionVersion,
   ): Promise<{ providerId: string; expectedRevision: number } | undefined> {
     const binding = await this.store.getBinding(resource.key);
     if (binding === null) return undefined;
@@ -261,6 +300,7 @@ export class ResourceService {
     const compatibility = evaluateProviderCompatibility({
       resource,
       provider,
+      definition,
       requireActive: false,
     });
     if (!compatibility.valid) {
@@ -270,14 +310,35 @@ export class ResourceService {
         violationsDetails(compatibility.violations),
       );
     }
-    if (policy !== null) evaluateSelectedPolicy(resource, policy, provider, binding);
+    if (policy !== null) evaluateSelectedPolicy(resource, policy, definition, provider, binding);
     return { providerId: provider.id, expectedRevision: provider.revision };
+  }
+
+  private async resolveDefinition(
+    key: string,
+    version: number,
+    requireActive: boolean,
+  ): Promise<ResourceKindDefinitionVersion> {
+    const definition = await this.store.getResourceKindDefinition(key, version);
+    if (definition === null) {
+      throw new NotFoundError('Resource kind definition', `${key}@${version}`);
+    }
+    if (requireActive && definition.parentStatus !== 'active') {
+      throw new ConflictError(
+        'resource_kind_definition_not_active',
+        'New Resources require an active Resource kind definition.',
+        { key, version, status: definition.parentStatus },
+      );
+    }
+    return definition;
   }
 }
 
 function candidateResource(input: {
   key: string;
   kind: ResourceKind;
+  kindVersion: number;
+  initialState: string;
   name: string;
   placement: JsonObject;
   specOverrides: JsonObject;
@@ -290,11 +351,12 @@ function candidateResource(input: {
     id: 'candidate',
     key: input.key,
     kind: input.kind,
+    kindVersion: input.kindVersion,
     name: input.name,
     placement: input.placement,
     specOverrides: input.specOverrides,
     spec: input.spec,
-    lifecycleState: 'absent',
+    lifecycleState: input.initialState,
     revision: 1,
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -306,6 +368,7 @@ function candidateResource(input: {
 function evaluateSelectedPolicy(
   resource: Resource,
   policy: PolicyVersion | null,
+  definition: ResourceKindDefinitionVersion,
   provider?: Provider,
   binding?: ProviderBinding,
 ): void {
@@ -313,6 +376,7 @@ function evaluateSelectedPolicy(
   const result = evaluatePolicy({
     resource,
     policy,
+    definition,
     ...(provider === undefined ? {} : { provider }),
     ...(binding === undefined ? {} : { binding }),
   });

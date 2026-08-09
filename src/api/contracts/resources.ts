@@ -6,14 +6,9 @@ import type {
   Resource,
   ResourceRelationship,
 } from '../../domain/models/global-registry';
-import { RESOURCE_KINDS } from '../../domain/models/global-registry';
 import { MAX_RESOURCE_DETAIL_PAGE_SIZE } from '../../domain/models/pagination';
-import {
-  resourceRecordSchema,
-  resourceSpecOverridesSchema as domainResourceSpecOverridesSchema,
-  resourceSpecSchema as domainResourceSpecSchema,
-} from '../../domain/models/schemas';
-import { placementSchema, resourceSpecOverrideSchemas } from '../../domain/resource/schemas';
+import { resourceRecordSchema } from '../../domain/models/schemas';
+import { placementSchema } from '../../domain/resource/schemas';
 import { auditEventListResponseSchema } from './observations';
 import { providerBindingResponseSchema, toProviderBindingResponse } from './bindings';
 import {
@@ -30,6 +25,7 @@ import {
   identifierSchema,
   auditPageLimitSchema,
   jsonRequest,
+  jsonObjectSchema,
   jsonResponse,
   keySchema,
   nullableSchema,
@@ -45,36 +41,21 @@ import {
 } from './common';
 import { standardErrorResponses } from './errors';
 
-const resourceSpecSchema = domainResourceSpecSchema.openapi('ResourceSpec');
-
-const resourceSpecOverridesSchema =
-  domainResourceSpecOverridesSchema.openapi('ResourceSpecOverrides');
-
-function createResourceVariant<const Kind extends (typeof RESOURCE_KINDS)[number]>(kind: Kind) {
-  return z
-    .object({
-      key: keySchema,
-      kind: z.literal(kind),
-      name: z.string().min(1).max(256),
-      placement: placementSchema.default({}),
-      specOverrides: resourceSpecOverrideSchemas[kind],
-      profile: profileReferenceSchema.optional(),
-      policy: policyReferenceSchema.optional(),
-    })
-    .strict();
-}
+const resourceSpecSchema = jsonObjectSchema;
+const resourceSpecOverridesSchema = jsonObjectSchema;
 
 const createResourceRequestSchema = z
-  .discriminatedUnion('kind', [
-    createResourceVariant(RESOURCE_KINDS[0]),
-    createResourceVariant(RESOURCE_KINDS[1]),
-    createResourceVariant(RESOURCE_KINDS[2]),
-    createResourceVariant(RESOURCE_KINDS[3]),
-    createResourceVariant(RESOURCE_KINDS[4]),
-    createResourceVariant(RESOURCE_KINDS[5]),
-    createResourceVariant(RESOURCE_KINDS[6]),
-    createResourceVariant(RESOURCE_KINDS[7]),
-  ])
+  .object({
+    key: keySchema,
+    kind: resourceKindSchema,
+    kindVersion: revisionSchema,
+    name: z.string().min(1).max(256),
+    placement: placementSchema.default({}),
+    specOverrides: jsonObjectSchema,
+    profile: profileReferenceSchema.optional(),
+    policy: policyReferenceSchema.optional(),
+  })
+  .strict()
   .openapi('CreateResourceRequest');
 
 const updateResourceRequestSchema = z
@@ -109,6 +90,7 @@ const resourceResponseSchema = resourceRecordSchema
     id: resourceRecordSchema.shape.id.openapi({ readOnly: true }),
     key: resourceRecordSchema.shape.key.openapi({ readOnly: true }),
     kind: resourceRecordSchema.shape.kind.openapi({ readOnly: true }),
+    kindVersion: resourceRecordSchema.shape.kindVersion.openapi({ readOnly: true }),
     profile: nullableSchema(profileReferenceSchema),
     policy: nullableSchema(policyReferenceSchema),
     specOverrides: resourceSpecOverridesSchema,
@@ -203,6 +185,7 @@ const resourceExample = {
   id: 'resource-6fd894bf',
   key: 'web-01',
   kind: 'compute',
+  kindVersion: 1,
   name: 'Web 01',
   profile: null,
   policy: null,
@@ -241,6 +224,7 @@ export const createResourceRoute = createRoute({
       {
         key: 'web-01',
         kind: 'compute',
+        kindVersion: 1,
         name: 'Web 01',
         placement: { locationKey: 'site-01' },
         specOverrides: resourceExample.specOverrides,

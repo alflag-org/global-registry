@@ -28,6 +28,7 @@ import type {
   ProviderBinding,
   ProfileVersion,
   Resource,
+  ResourceKindDefinitionVersion,
   ResourceQuery,
   ResourceRelationship,
   UpdateResource,
@@ -54,9 +55,15 @@ import {
   type UpdateDriftInput,
 } from './observations';
 import { D1Exports } from './exports';
+import { D1ResourceKindDefinitions } from './resource-kind-definitions';
+import type {
+  PersistResourceKindDefinitionInput,
+  ResourceKindDefinitionSummary,
+} from '../../application/resource-kind-definitions';
 
 export class D1GlobalRegistryRepository {
   private readonly resources: D1Resources;
+  private readonly resourceKindDefinitions: D1ResourceKindDefinitions;
   private readonly providers: D1Providers;
   private readonly profiles: D1Profiles;
   private readonly policies: D1Policies;
@@ -70,6 +77,7 @@ export class D1GlobalRegistryRepository {
 
   constructor(db: D1Database) {
     this.resources = new D1Resources(db);
+    this.resourceKindDefinitions = new D1ResourceKindDefinitions(db);
     this.providers = new D1Providers(db);
     this.profiles = new D1Profiles(db);
     this.policies = new D1Policies(db);
@@ -127,6 +135,38 @@ export class D1GlobalRegistryRepository {
 
   async updateResource(input: UpdateResource): Promise<Resource> {
     return this.resources.update(input);
+  }
+
+  async createResourceKindDefinitionVersion(
+    input: PersistResourceKindDefinitionInput,
+  ): Promise<ResourceKindDefinitionVersion> {
+    return this.resourceKindDefinitions.createVersion(input);
+  }
+
+  async getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null> {
+    return this.resourceKindDefinitions.get(key, version);
+  }
+
+  async getResourceKindDefinitionSummary(
+    key: string,
+  ): Promise<ResourceKindDefinitionSummary | null> {
+    return this.resourceKindDefinitions.getSummary(key);
+  }
+
+  async updateResourceKindDefinitionStatus(input: {
+    key: string;
+    status: ResourceKindDefinitionVersion['parentStatus'];
+    expectedRevision: number;
+    actorId: string;
+  }): Promise<ResourceKindDefinitionSummary> {
+    return this.resourceKindDefinitions.updateStatus(input);
+  }
+
+  async listResourceKindDefinitions(limit?: number): Promise<ResourceKindDefinitionSummary[]> {
+    return this.resourceKindDefinitions.list(limit);
   }
 
   async getProvider(id: string): Promise<Provider | null> {

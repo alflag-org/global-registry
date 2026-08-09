@@ -55,6 +55,7 @@ function computeResourceBody(key: string, name = key): JsonRecord {
   return {
     key,
     kind: 'compute',
+    kindVersion: 1,
     name,
     placement: { locationKey: 'site-01' },
     specOverrides: {
@@ -70,6 +71,7 @@ function networkResourceBody(key: string, name = key): JsonRecord {
   return {
     key,
     kind: 'network',
+    kindVersion: 1,
     name,
     placement: { locationKey: 'site-01' },
     specOverrides: {
@@ -153,6 +155,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'site-01',
         kind: 'location',
+        kindVersion: 1,
         name: 'KANAGAWA01',
         placement: {},
         specOverrides: { category: 'site' },
@@ -252,6 +255,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'compute-defaults',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: {
           substrate: 'vm',
           architecture: 'amd64',
@@ -267,6 +271,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'profiled-web',
         kind: 'compute',
+        kindVersion: 1,
         name: 'Profiled Web',
         placement: { locationKey: 'site-01' },
         profile: { key: 'compute-defaults', version: 1 },
@@ -286,6 +291,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'compute-defaults',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: {
           substrate: 'vm',
           architecture: 'amd64',
@@ -332,6 +338,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'compute-defaults',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: { memoryMiB: 4096 },
         expectedRevision: 2,
       }),
@@ -359,6 +366,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'compute-defaults',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: {
           substrate: 'vm',
           architecture: 'amd64',
@@ -375,6 +383,7 @@ describe.sequential('control-plane API', () => {
         namespace: 'compute',
         key: 'profile-limit',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: { memoryMiB: { maximum: 8192 } },
       }),
     });
@@ -401,6 +410,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'profile-policy-host',
         kind: 'compute',
+        kindVersion: 1,
         name: 'Profile Policy Host',
         placement: { locationKey: 'site-01' },
         profile: { key: 'compute-defaults', version: 2 },
@@ -430,6 +440,7 @@ describe.sequential('control-plane API', () => {
       body: JSON.stringify({
         key: 'invalid-profile-kind',
         kind: 'network',
+        kindVersion: 1,
         name: 'Invalid Profile Kind',
         placement: { locationKey: 'site-01' },
         profile: { key: 'compute-defaults', version: 1 },
@@ -454,6 +465,8 @@ describe.sequential('control-plane API', () => {
         actorId: 'actor-admin',
         key: 'stale-reference-create',
         kind: 'compute',
+        kindVersion: 1,
+        initialState: 'absent',
         name: 'Stale Reference Create',
         placement: { locationKey: 'site-01' },
         specOverrides: {},
@@ -482,10 +495,293 @@ describe.sequential('control-plane API', () => {
     expect(Number(staleReferenceEvents?.count)).toBe(0);
   });
 
-  it('returns validation errors rather than internal errors for invalid enum queries', async () => {
-    const response = await request('access:test-admin', '/api/v1/resources?kind=invalid-kind');
+  it('returns validation errors rather than internal errors for malformed kind queries', async () => {
+    const response = await request('access:test-admin', '/api/v1/resources?kind=InvalidKind');
     expect(response.status).toBe(400);
     expect(asRecord(await response.json()).error).toMatchObject({ code: 'invalid_query' });
+  });
+
+  it('pins Resources to immutable extensible kind definitions', async () => {
+    const definitionKey = 'example.internal-appliance';
+    const firstDefinition = await request(
+      'access:test-admin',
+      '/api/v1/resource-kind-definitions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          key: definitionKey,
+          states: ['absent', 'ready', 'retired'],
+          initialState: 'absent',
+          terminalStates: ['retired'],
+          transitions: [
+            { from: 'absent', to: 'ready', destructive: false },
+            { from: 'ready', to: 'retired', destructive: true },
+          ],
+          placementMode: 'located',
+          relationshipRules: [{ relationshipType: 'depends_on', targetKinds: [definitionKey] }],
+        }),
+      },
+    );
+    expect(firstDefinition.status).toBe(201);
+    expect(asRecord(await firstDefinition.json())).toMatchObject({
+      key: definitionKey,
+      version: 1,
+      specificationMode: 'opaque',
+      revision: 1,
+    });
+
+    const createdResource = await request('access:test-admin', '/api/v1/resources', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'extension-appliance',
+        kind: definitionKey,
+        kindVersion: 1,
+        name: 'Extension Appliance',
+        placement: { locationKey: 'site-01' },
+        specOverrides: { model: 'appliance-v1', capacity: 2 },
+      }),
+    });
+    expect(createdResource.status).toBe(201);
+    expect(asRecord(await createdResource.json())).toMatchObject({
+      kind: definitionKey,
+      kindVersion: 1,
+      lifecycleState: 'absent',
+    });
+
+    const secretLikeResource = await request('access:test-admin', '/api/v1/resources', {
+      method: 'POST',
+      body: JSON.stringify({
+        key: 'extension-secret',
+        kind: definitionKey,
+        kindVersion: 1,
+        name: 'Extension Secret',
+        placement: { locationKey: 'site-01' },
+        specOverrides: { apiToken: 'must-not-be-persisted' },
+      }),
+    });
+    expect(secretLikeResource.status).toBe(422);
+    expect(asRecord(await secretLikeResource.json()).error).toMatchObject({
+      code: 'secret_like_json_key',
+    });
+
+    const secondDefinition = await request(
+      'access:test-admin',
+      '/api/v1/resource-kind-definitions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          key: definitionKey,
+          states: ['absent', 'configured', 'ready', 'retired'],
+          initialState: 'absent',
+          terminalStates: ['retired'],
+          transitions: [
+            { from: 'absent', to: 'configured', destructive: false },
+            { from: 'configured', to: 'ready', destructive: false },
+            { from: 'ready', to: 'retired', destructive: true },
+          ],
+          placementMode: 'located',
+          relationshipRules: [{ relationshipType: 'depends_on', targetKinds: [definitionKey] }],
+          expectedRevision: 1,
+        }),
+      },
+    );
+    expect(secondDefinition.status).toBe(201);
+    expect(asRecord(await secondDefinition.json())).toMatchObject({
+      key: definitionKey,
+      version: 2,
+      revision: 2,
+    });
+
+    const operationResponse = await request('access:test-provisioner', '/api/v1/operations', {
+      method: 'POST',
+      body: JSON.stringify({
+        kind: 'configure-extension',
+        resources: [
+          {
+            resourceKey: 'extension-appliance',
+            sourceState: 'absent',
+            targetState: 'ready',
+            resourceRevision: 1,
+          },
+        ],
+      }),
+    });
+    expect(operationResponse.status).toBe(201);
+    const operationId = String(asRecord(await operationResponse.json()).id);
+    const lockResponse = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/locks`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ scopes: ['resource/extension-appliance'], leaseSeconds: 120 }),
+      },
+    );
+    expect(lockResponse.status).toBe(201);
+    const fencingToken = Number(
+      (asRecord(await lockResponse.json()).items as Array<JsonRecord>)[0]?.fencingToken,
+    );
+
+    const start = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/start`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: 1,
+          lockScope: 'resource/extension-appliance',
+          fencingToken,
+        }),
+      },
+    );
+    expect(start.status).toBe(200);
+
+    const transition = await request(
+      'access:test-provisioner',
+      '/api/v1/resources/extension-appliance/transitions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          targetState: 'ready',
+          expectedRevision: 1,
+          operationId,
+          fencingToken,
+        }),
+      },
+    );
+    expect(transition.status).toBe(200);
+    expect(asRecord(await transition.json())).toMatchObject({
+      kindVersion: 1,
+      lifecycleState: 'ready',
+    });
+
+    const complete = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: 2,
+          lockScope: 'resource/extension-appliance',
+          fencingToken,
+        }),
+      },
+    );
+    expect(complete.status).toBe(200);
+
+    const release = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/locks/release`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ scopes: ['resource/extension-appliance'] }),
+      },
+    );
+    expect(release.status).toBe(204);
+
+    const detail = await request('access:test-admin', '/api/v1/resources/extension-appliance');
+    expect(detail.status).toBe(200);
+    expect(asRecord(asRecord(await detail.json()).resource)).toMatchObject({
+      kind: definitionKey,
+      kindVersion: 1,
+      lifecycleState: 'ready',
+    });
+
+    const firstVersion = await request(
+      'access:test-admin',
+      `/api/v1/resource-kind-definitions/${definitionKey}/versions/1`,
+    );
+    expect(firstVersion.status).toBe(200);
+    const firstVersionBody = asRecord(await firstVersion.json());
+    expect(firstVersionBody.version).toBe(1);
+    expect(firstVersionBody.transitions).toEqual(
+      expect.arrayContaining([{ from: 'absent', to: 'ready', destructive: false }]),
+    );
+
+    const definitions = await request('access:test-admin', '/api/v1/resource-kind-definitions');
+    expect(definitions.status).toBe(200);
+    expect(asRecord(await definitions.json()).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: definitionKey, version: 2, revision: 2 }),
+      ]),
+    );
+
+    const deprecated = await request(
+      'access:test-admin',
+      `/api/v1/resource-kind-definitions/${definitionKey}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'deprecated', expectedRevision: 2 }),
+      },
+    );
+    expect(deprecated.status).toBe(200);
+    expect(asRecord(await deprecated.json())).toMatchObject({
+      status: 'deprecated',
+      revision: 3,
+    });
+
+    const versionWhileDeprecated = await request(
+      'access:test-admin',
+      '/api/v1/resource-kind-definitions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          key: definitionKey,
+          states: ['absent', 'ready', 'retired'],
+          initialState: 'absent',
+          terminalStates: ['retired'],
+          transitions: [
+            { from: 'absent', to: 'ready', destructive: false },
+            { from: 'ready', to: 'retired', destructive: true },
+          ],
+          placementMode: 'located',
+          relationshipRules: [],
+          expectedRevision: 3,
+        }),
+      },
+    );
+    expect(versionWhileDeprecated.status).toBe(409);
+    expect(asRecord(await versionWhileDeprecated.json()).error).toMatchObject({
+      code: 'resource_kind_definition_not_active',
+    });
+
+    const retired = await request(
+      'access:test-admin',
+      `/api/v1/resource-kind-definitions/${definitionKey}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'retired', expectedRevision: 3 }),
+      },
+    );
+    expect(retired.status).toBe(200);
+    expect(asRecord(await retired.json())).toMatchObject({ status: 'retired', revision: 4 });
+
+    const reactivate = await request(
+      'access:test-admin',
+      `/api/v1/resource-kind-definitions/${definitionKey}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'active', expectedRevision: 4 }),
+      },
+    );
+    expect(reactivate.status).toBe(409);
+    expect(asRecord(await reactivate.json()).error).toMatchObject({
+      code: 'resource_kind_definition_retired',
+    });
+
+    const definitionEvents = await env.DB.prepare(
+      `SELECT event_type
+         FROM events
+        WHERE json_extract(payload_json, '$.key') = ?
+        ORDER BY occurred_at, event_id`,
+    )
+      .bind(definitionKey)
+      .all<{ event_type: string }>();
+    expect(definitionEvents.results.map(({ event_type: eventType }) => eventType)).toEqual([
+      'resource_kind_definition.created',
+      'resource_kind_definition.version_created',
+      'resource_kind_definition.status_changed',
+      'resource_kind_definition.status_changed',
+    ]);
   });
 
   it('records health without deriving lifecycle and rejects observer lifecycle writes', async () => {
@@ -1023,6 +1319,7 @@ describe.sequential('control-plane API', () => {
         namespace: 'compute',
         key: 'standard',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: {
           allowedArchitectures: ['amd64'],
           requiredProviderCapabilities: ['compute.vm'],
@@ -1466,6 +1763,7 @@ describe.sequential('control-plane API', () => {
         namespace: 'compute',
         key: 'standard',
         resourceKind: 'compute',
+        resourceKindVersion: 1,
         spec: { memoryMiB: { maximum: 1024 } },
         expectedRevision: 1,
       }),

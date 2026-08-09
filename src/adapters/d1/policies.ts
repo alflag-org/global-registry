@@ -9,6 +9,7 @@ export interface CreatePolicyInput {
   namespace: string;
   key: string;
   resourceKind: Resource['kind'];
+  resourceKindVersion: number;
   spec: JsonObject;
   actorId: string;
   expectedRevision?: number;
@@ -18,6 +19,7 @@ export interface PolicySummary {
   namespace: string;
   key: string;
   resourceKind: Resource['kind'];
+  resourceKindVersion: number;
   version: number;
   status: PolicyVersion['parentStatus'];
   revision: number;
@@ -49,11 +51,13 @@ export class D1Policies extends D1Client {
         ),
         this.statement(
           `INSERT INTO policy_versions (
-            namespace, policy_key, version, resource_kind, spec_json, created_at, created_by
-          ) VALUES (?, ?, 1, ?, ?, ?, ?)`,
+            namespace, policy_key, version, resource_kind, resource_kind_version,
+            spec_json, created_at, created_by
+          ) VALUES (?, ?, 1, ?, ?, ?, ?, ?)`,
           input.namespace,
           input.key,
           input.resourceKind,
+          input.resourceKindVersion,
           JSON.stringify(spec),
           createdAt,
           input.actorId,
@@ -65,6 +69,7 @@ export class D1Policies extends D1Client {
         key: input.key,
         version: 1,
         resourceKind: input.resourceKind,
+        resourceKindVersion: input.resourceKindVersion,
         spec,
         parentStatus: 'active',
         revision: 1,
@@ -98,15 +103,17 @@ export class D1Policies extends D1Client {
     const results = await this.db.batch([
       this.statement(
         `INSERT INTO policy_versions (
-          namespace, policy_key, version, resource_kind, spec_json, created_at, created_by
+          namespace, policy_key, version, resource_kind, resource_kind_version,
+          spec_json, created_at, created_by
         )
-        SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+        SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
           SELECT 1 FROM policies WHERE namespace = ? AND key = ? AND revision = ?
         )`,
         input.namespace,
         input.key,
         version,
         input.resourceKind,
+        input.resourceKindVersion,
         JSON.stringify(spec),
         createdAt,
         input.actorId,
@@ -137,6 +144,7 @@ export class D1Policies extends D1Client {
       key: input.key,
       version,
       resourceKind: input.resourceKind,
+      resourceKindVersion: input.resourceKindVersion,
       spec,
       parentStatus: 'active',
       revision: input.expectedRevision + 1,
@@ -151,11 +159,13 @@ export class D1Policies extends D1Client {
       revision: number;
       version: number;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       status: PolicyVersion['parentStatus'];
       spec_json: string;
       created_at: string;
     }>(
       `SELECT p.namespace, p.key, p.revision, p.status, pv.version, pv.resource_kind,
+          pv.resource_kind_version,
           pv.spec_json, pv.created_at
        FROM policies p JOIN policy_versions pv
          ON pv.namespace = p.namespace AND pv.policy_key = p.key
@@ -171,6 +181,7 @@ export class D1Policies extends D1Client {
           key: row.key,
           version: row.version,
           resourceKind: row.resource_kind,
+          resourceKindVersion: row.resource_kind_version,
           spec: parseJsonObject(row.spec_json, 'policy spec'),
           parentStatus: row.status,
           revision: row.revision,
@@ -184,10 +195,12 @@ export class D1Policies extends D1Client {
       key: string;
       current_version: number;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       status: PolicyVersion['parentStatus'];
       revision: number;
     }>(
-      `SELECT p.namespace, p.key, p.current_version, pv.resource_kind, p.status, p.revision
+      `SELECT p.namespace, p.key, p.current_version, pv.resource_kind,
+          pv.resource_kind_version, p.status, p.revision
        FROM policies p JOIN policy_versions pv
          ON pv.namespace = p.namespace AND pv.policy_key = p.key
          AND pv.version = p.current_version
@@ -201,6 +214,7 @@ export class D1Policies extends D1Client {
           namespace: row.namespace,
           key: row.key,
           resourceKind: row.resource_kind,
+          resourceKindVersion: row.resource_kind_version,
           version: row.current_version,
           status: row.status,
           revision: row.revision,
@@ -263,10 +277,12 @@ export class D1Policies extends D1Client {
       key: string;
       current_version: number;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       status: PolicyVersion['parentStatus'];
       revision: number;
     }>(
-      `SELECT p.namespace, p.key, p.current_version, pv.resource_kind, p.status, p.revision
+      `SELECT p.namespace, p.key, p.current_version, pv.resource_kind,
+          pv.resource_kind_version, p.status, p.revision
        FROM policies p JOIN policy_versions pv
          ON pv.namespace = p.namespace AND pv.policy_key = p.key
          AND pv.version = p.current_version
@@ -277,6 +293,7 @@ export class D1Policies extends D1Client {
       namespace: row.namespace,
       key: row.key,
       resourceKind: row.resource_kind,
+      resourceKindVersion: row.resource_kind_version,
       version: row.current_version,
       status: row.status,
       revision: row.revision,

@@ -1,5 +1,5 @@
 /** Current on-disk format for chunked portable registry exports. */
-export const PORTABLE_EXPORT_SCHEMA_VERSION = '1.2' as const;
+export const PORTABLE_EXPORT_SCHEMA_VERSION = '1.3' as const;
 
 /** Maximum number of export processing claims before one stale-lease recovery. */
 export const MAX_EXPORT_ATTEMPTS = 5;

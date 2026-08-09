@@ -1,12 +1,19 @@
 import type { DomainViolation } from '../errors/violations';
-import type { Provider, Resource, ResourceKind } from '../models/global-registry';
+import type {
+  Provider,
+  Resource,
+  ResourceKindDefinitionVersion,
+  StandardResourceKind,
+} from '../models/global-registry';
 import type { ProviderCapabilities, ProviderCapability, ProviderStatus } from './model';
 import { providerCapabilitiesSchema, providerDriverSchema } from './schemas';
 import { placementSchema, resourceSpecSchemas } from '../resource/schemas';
+import { isStandardResourceKind } from '../resource-kind/validation';
 
 interface CompatibilityInput {
   resource: Resource;
   provider: Provider;
+  definition: ResourceKindDefinitionVersion;
   requireActive?: boolean;
 }
 
@@ -18,7 +25,14 @@ interface CompatibilityResult {
 export function evaluateProviderCompatibility(input: CompatibilityInput): CompatibilityResult {
   const violations: DomainViolation[] = [];
   const provider = parseProvider(input.provider);
-  const resourceSpec = resourceSpecSchemas[input.resource.kind].parse(input.resource.spec);
+  const standardKind =
+    input.definition.specificationMode === 'standard' && isStandardResourceKind(input.resource.kind)
+      ? input.resource.kind
+      : undefined;
+  const resourceSpec =
+    standardKind === undefined
+      ? input.resource.spec
+      : resourceSpecSchemas[standardKind].parse(input.resource.spec);
   const placement = placementSchema.parse(input.resource.placement);
 
   if ((input.requireActive ?? true) && provider.status !== 'active') {
@@ -37,7 +51,9 @@ export function evaluateProviderCompatibility(input: CompatibilityInput): Compat
     });
   }
 
-  for (const capability of requiredCapabilities(input.resource.kind, resourceSpec)) {
+  for (const capability of standardKind === undefined
+    ? []
+    : requiredCapabilities(standardKind, resourceSpec)) {
     if (!provider.capabilities.features.includes(capability)) {
       violations.push({
         code: 'missing_resource_capability',
@@ -48,9 +64,11 @@ export function evaluateProviderCompatibility(input: CompatibilityInput): Compat
   }
 
   const architecture =
-    'architecture' in resourceSpec && typeof resourceSpec.architecture === 'string'
-      ? resourceSpec.architecture
-      : undefined;
+    standardKind === undefined
+      ? undefined
+      : 'architecture' in resourceSpec && typeof resourceSpec.architecture === 'string'
+        ? resourceSpec.architecture
+        : undefined;
   if (architecture !== undefined && !provider.capabilities.architectures.includes(architecture)) {
     violations.push({
       code: 'unsupported_architecture',
@@ -88,7 +106,7 @@ export function evaluateProviderCompatibility(input: CompatibilityInput): Compat
 }
 
 function requiredCapabilities(
-  kind: ResourceKind,
+  kind: StandardResourceKind,
   spec: Record<string, unknown>,
 ): ProviderCapability[] {
   switch (kind) {

@@ -12,6 +12,9 @@ import { evaluatePolicy } from '../../src/domain/policy/evaluator';
 import { validatePolicyDefinition } from '../../src/domain/policy/validation';
 import { evaluateProviderCompatibility } from '../../src/domain/provider/compatibility';
 import { validateProviderDefinition } from '../../src/domain/provider/validation';
+import { standardResourceKindDefinition } from '../../src/domain/resource-kind/standard';
+
+const computeDefinition = standardResourceKindDefinition('compute');
 
 const capabilities = {
   resourceKinds: ['compute'],
@@ -30,6 +33,7 @@ function computeResource(): Resource {
     id: 'resource-1',
     key: 'compute-1',
     kind: 'compute',
+    kindVersion: 1,
     name: 'Compute 1',
     placement: {
       locationKey: 'site-01',
@@ -144,6 +148,7 @@ describe('provider domain validation', () => {
       evaluateProviderCompatibility({
         resource: computeResource(),
         provider: internalProvider(),
+        definition: computeDefinition,
       }),
     ).toEqual({ valid: true, violations: [] });
 
@@ -153,6 +158,7 @@ describe('provider domain validation', () => {
       evaluateProviderCompatibility({
         resource: computeResource(),
         provider,
+        definition: computeDefinition,
       }),
     ).toEqual({ valid: true, violations: [] });
   });
@@ -167,6 +173,7 @@ describe('provider domain validation', () => {
     const result = evaluateProviderCompatibility({
       resource: computeResource(),
       provider,
+      definition: computeDefinition,
     });
     expect(result.violations).toContainEqual({
       code: 'missing_resource_capability',
@@ -203,6 +210,7 @@ describe('provider domain validation', () => {
         };
       },
       getPolicyVersion: async () => null,
+      getResourceKindDefinition: async () => computeDefinition,
       updateProvider: async () => current,
     };
     const service = new ProviderService(store);
@@ -245,6 +253,7 @@ describe('provider domain validation', () => {
         };
       },
       getPolicyVersion: async () => null,
+      getResourceKindDefinition: async () => computeDefinition,
       updateProvider: async (input) => {
         updateInput = input;
         return current;
@@ -269,6 +278,7 @@ describe('deterministic policy evaluation', () => {
     key: 'standard-vm',
     version: 1,
     resourceKind: 'compute',
+    resourceKindVersion: 1,
     spec: {
       allowedArchitectures: ['amd64'],
       vcpu: { minimum: 1, maximum: 16 },
@@ -283,26 +293,35 @@ describe('deterministic policy evaluation', () => {
 
   it('rejects invalid policy schema and resource kind mismatch', () => {
     expect(() =>
-      validatePolicyDefinition({
-        namespace: 'compute',
-        key: 'invalid',
-        resourceKind: 'compute',
-        spec: { expression: 'resource.vcpu < 8' },
-      }),
+      validatePolicyDefinition(
+        {
+          namespace: 'compute',
+          key: 'invalid',
+          resourceKind: 'compute',
+          resourceKindVersion: 1,
+          spec: { expression: 'resource.vcpu < 8' },
+        },
+        computeDefinition,
+      ),
     ).toThrowError(ValidationError);
     expect(() =>
-      validatePolicyDefinition({
-        namespace: 'compute',
-        key: 'zero-bounds',
-        resourceKind: 'compute',
-        spec: { vcpu: { maximum: 0 } },
-      }),
+      validatePolicyDefinition(
+        {
+          namespace: 'compute',
+          key: 'zero-bounds',
+          resourceKind: 'compute',
+          resourceKindVersion: 1,
+          spec: { vcpu: { maximum: 0 } },
+        },
+        computeDefinition,
+      ),
     ).toThrowError(ValidationError);
 
     expect(
       evaluatePolicy({
         resource: { ...computeResource(), kind: 'endpoint' },
         policy,
+        definition: computeDefinition,
       }).violations[0]?.code,
     ).toBe('policy_resource_kind_mismatch');
   });
@@ -313,6 +332,7 @@ describe('deterministic policy evaluation', () => {
     const result = evaluatePolicy({
       resource,
       policy,
+      definition: computeDefinition,
       provider: internalProvider(),
       binding: binding(),
     });
@@ -335,6 +355,7 @@ describe('deterministic policy evaluation', () => {
         ...policy,
         spec: { requiredProviderCapabilities: ['storage.snapshot'] },
       },
+      definition: computeDefinition,
       provider: internalProvider(),
       binding: binding(),
     });

@@ -1,16 +1,16 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import type { ProfileVersion } from '../../domain/models/global-registry';
-import { RESOURCE_KINDS } from '../../domain/models/global-registry';
-import { profileSpecSchema, profileVersionRecordSchema } from '../../domain/models/schemas';
-import { resourceSpecOverrideSchemas } from '../../domain/resource/schemas';
+import { profileVersionRecordSchema } from '../../domain/models/schemas';
 import type { ProfileSummary } from '../../application/profiles';
 import {
   jsonRequest,
+  jsonObjectSchema,
   jsonResponse,
   keySchema,
   pageLimitSchema,
   parseResponse,
   protectedRouteMetadata,
+  resourceKindSchema,
   revisionSchema,
   versionParentStatusSchema,
 } from './common';
@@ -21,28 +21,15 @@ const listProfilesQuerySchema = z
   .strict()
   .openapi('ListProfilesQuery');
 
-function createProfileVariant<const Kind extends (typeof RESOURCE_KINDS)[number]>(kind: Kind) {
-  return z
-    .object({
-      key: keySchema,
-      resourceKind: z.literal(kind),
-      spec: resourceSpecOverrideSchemas[kind],
-      expectedRevision: revisionSchema.optional(),
-    })
-    .strict();
-}
-
 const createProfileVersionRequestSchema = z
-  .discriminatedUnion('resourceKind', [
-    createProfileVariant(RESOURCE_KINDS[0]),
-    createProfileVariant(RESOURCE_KINDS[1]),
-    createProfileVariant(RESOURCE_KINDS[2]),
-    createProfileVariant(RESOURCE_KINDS[3]),
-    createProfileVariant(RESOURCE_KINDS[4]),
-    createProfileVariant(RESOURCE_KINDS[5]),
-    createProfileVariant(RESOURCE_KINDS[6]),
-    createProfileVariant(RESOURCE_KINDS[7]),
-  ])
+  .object({
+    key: keySchema,
+    resourceKind: resourceKindSchema,
+    resourceKindVersion: revisionSchema,
+    spec: jsonObjectSchema,
+    expectedRevision: revisionSchema.optional(),
+  })
+  .strict()
   .openapi('CreateProfileVersionRequest');
 
 const updateProfileStatusRequestSchema = z
@@ -53,13 +40,16 @@ const updateProfileStatusRequestSchema = z
   .strict()
   .openapi('UpdateProfileStatusRequest');
 
-const profileSpecResponseSchema = profileSpecSchema.openapi('ProfileSpec');
+const profileSpecResponseSchema = jsonObjectSchema;
 
 const profileVersionResponseSchema = profileVersionRecordSchema
   .extend({
     key: profileVersionRecordSchema.shape.key.openapi({ readOnly: true }),
     version: profileVersionRecordSchema.shape.version.openapi({ readOnly: true }),
     resourceKind: profileVersionRecordSchema.shape.resourceKind.openapi({ readOnly: true }),
+    resourceKindVersion: profileVersionRecordSchema.shape.resourceKindVersion.openapi({
+      readOnly: true,
+    }),
     spec: profileSpecResponseSchema,
     parentStatus: profileVersionRecordSchema.shape.parentStatus.openapi({ readOnly: true }),
     revision: profileVersionRecordSchema.shape.revision.openapi({ readOnly: true }),
@@ -72,11 +62,15 @@ const profileSummaryResponseSchema = profileVersionRecordSchema
   .pick({
     key: true,
     resourceKind: true,
+    resourceKindVersion: true,
     version: true,
   })
   .extend({
     key: profileVersionRecordSchema.shape.key.openapi({ readOnly: true }),
     resourceKind: profileVersionRecordSchema.shape.resourceKind.openapi({ readOnly: true }),
+    resourceKindVersion: profileVersionRecordSchema.shape.resourceKindVersion.openapi({
+      readOnly: true,
+    }),
     version: profileVersionRecordSchema.shape.version.openapi({ readOnly: true }),
     status: versionParentStatusSchema,
   })
@@ -121,6 +115,7 @@ const profileVersionExample = {
   key: 'compute-defaults',
   version: 1,
   resourceKind: 'compute',
+  resourceKindVersion: 1,
   spec: { substrate: 'vm', architecture: 'amd64', vcpu: 2, memoryMiB: 4096 },
   parentStatus: 'active',
   revision: 1,
@@ -130,6 +125,7 @@ const profileVersionExample = {
 const profileSummaryExample = {
   key: profileVersionExample.key,
   resourceKind: profileVersionExample.resourceKind,
+  resourceKindVersion: profileVersionExample.resourceKindVersion,
   version: 1,
   status: 'active',
   revision: 1,
@@ -151,6 +147,7 @@ export const createProfileVersionRoute = createRoute({
       {
         key: profileVersionExample.key,
         resourceKind: profileVersionExample.resourceKind,
+        resourceKindVersion: profileVersionExample.resourceKindVersion,
         spec: profileVersionExample.spec,
       },
     ),

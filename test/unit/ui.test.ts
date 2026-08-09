@@ -15,6 +15,7 @@ import { renderResourcesPage } from '../../src/ui/pages/resources';
 import { renderResourceDetailPage } from '../../src/ui/pages/resource-detail';
 import { renderShell } from '../../src/ui/shell';
 import { styles } from '../../src/ui/styles';
+import { standardResourceKindDefinition } from '../../src/domain/resource-kind/standard';
 
 function actor(overrides: Partial<Actor> = {}): Actor {
   return {
@@ -143,6 +144,7 @@ describe('access management UI', () => {
           id: 'resource-1',
           key: 'site-01',
           kind: 'compute',
+          kindVersion: 1,
           name: 'Site 01',
           lifecycleState: 'ready',
           revision: 1,
@@ -165,6 +167,7 @@ describe('access management UI', () => {
       id: 'resource-parent',
       key: 'parent',
       kind: 'compute',
+      kindVersion: 1,
       name: 'Parent',
       placement: {},
       specOverrides: {},
@@ -208,6 +211,7 @@ describe('access management UI', () => {
       allResources: [resource],
       events: [],
       actor: actor(),
+      definition: standardResourceKindDefinition('compute'),
       query: { relationshipCursor: 'rel-005', driftCursor: 'drift-005' },
     });
 

@@ -19,6 +19,8 @@ const rawExportTables = new Set([
   'd1_migrations',
   'actors',
   'providers',
+  'resource_kind_definitions',
+  'resource_kind_definition_versions',
   'profiles',
   'profile_versions',
   'policies',
@@ -44,6 +46,7 @@ const rawExportTables = new Set([
 
 const rawExportIndexes = new Set([
   'idx_actors_active_admin',
+  'idx_resource_kind_definitions_status',
   'idx_resources_kind',
   'idx_resources_lifecycle',
   'idx_relationships_source',
@@ -80,6 +83,11 @@ const rawExportTriggers = new Set([
   'actors_audit_after_update',
   'providers_retirement_requires_no_bindings',
   'providers_retirement_is_terminal',
+  'resource_kind_definitions_retirement_is_terminal',
+  'resource_kind_definitions_key_immutable',
+  'resource_kind_definitions_no_hard_delete',
+  'resource_kind_definition_versions_append_only_update',
+  'resource_kind_definition_versions_append_only_delete',
   'profiles_retirement_is_terminal',
   'policies_retirement_is_terminal',
   'resources_key_immutable',
@@ -157,11 +165,18 @@ try {
   } else {
     requireColumns(database, {
       actors: ['created_by', 'updated_by'],
-      resources: ['spec_overrides_json', 'effective_spec_json'],
+      resource_kind_definitions: ['status', 'current_version', 'revision'],
+      resource_kind_definition_versions: [
+        'kind_key',
+        'states_json',
+        'transitions_json',
+        'specification_mode',
+      ],
+      resources: ['kind_version', 'spec_overrides_json', 'effective_spec_json'],
       providers: ['status', 'binding_revision', 'configuration_json'],
-      profiles: ['status'],
+      profiles: ['resource_kind_version', 'status'],
       policies: ['status'],
-      policy_versions: ['resource_kind'],
+      policy_versions: ['resource_kind', 'resource_kind_version'],
       resource_relationships: ['revision'],
       drifts: ['fingerprint'],
       outbox: ['consumer_attempts', 'producer_attempts', 'updated_at'],
@@ -417,6 +432,14 @@ function sqlWithoutLiteralsAndComments(statement: string): string {
 function readSnapshot(database: DatabaseSync): unknown {
   const actorRows = snapshotRows(database, 'SELECT * FROM actors ORDER BY id');
   const providerRows = snapshotRows(database, 'SELECT * FROM providers ORDER BY id');
+  const resourceKindDefinitionRows = snapshotRows(
+    database,
+    'SELECT * FROM resource_kind_definitions ORDER BY key',
+  );
+  const resourceKindDefinitionVersionRows = snapshotRows(
+    database,
+    'SELECT * FROM resource_kind_definition_versions ORDER BY kind_key, version',
+  );
   const profileRows = snapshotRows(database, 'SELECT * FROM profiles ORDER BY key');
   const profileVersionRows = snapshotRows(
     database,
@@ -509,9 +532,43 @@ function readSnapshot(database: DatabaseSync): unknown {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     })),
+    resourceKindDefinitions: resourceKindDefinitionRows.map((row) => ({
+      key: row.key,
+      status: row.status,
+      currentVersion: row.current_version,
+      revision: row.revision,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+    resourceKindDefinitionVersions: resourceKindDefinitionVersionRows.map((row) => ({
+      kindKey: row.kind_key,
+      version: row.version,
+      states: parseJson(
+        row.states_json,
+        `resourceKindDefinitionVersions.${String(row.kind_key)}.states_json`,
+      ),
+      initialState: row.initial_state,
+      terminalStates: parseJson(
+        row.terminal_states_json,
+        `resourceKindDefinitionVersions.${String(row.kind_key)}.terminal_states_json`,
+      ),
+      transitions: parseJson(
+        row.transitions_json,
+        `resourceKindDefinitionVersions.${String(row.kind_key)}.transitions_json`,
+      ),
+      placementMode: row.placement_mode,
+      specificationMode: row.specification_mode,
+      relationshipRules: parseJson(
+        row.relationship_rules_json,
+        `resourceKindDefinitionVersions.${String(row.kind_key)}.relationship_rules_json`,
+      ),
+      createdAt: row.created_at,
+      ...optionalProperty('createdBy', row.created_by),
+    })),
     profiles: profileRows.map((row) => ({
       key: row.key,
       resourceKind: row.resource_kind,
+      resourceKindVersion: row.resource_kind_version,
       status: row.status,
       currentVersion: row.current_version,
       revision: row.revision,
@@ -539,6 +596,7 @@ function readSnapshot(database: DatabaseSync): unknown {
       policyKey: row.policy_key,
       version: row.version,
       resourceKind: row.resource_kind,
+      resourceKindVersion: row.resource_kind_version,
       spec: parseJson(row.spec_json, `policyVersions.${String(row.policy_key)}.spec_json`),
       createdAt: row.created_at,
       createdBy: row.created_by,
@@ -547,6 +605,7 @@ function readSnapshot(database: DatabaseSync): unknown {
       id: row.id,
       key: row.key,
       kind: row.kind,
+      kindVersion: row.kind_version,
       name: row.name,
       ...(row.profile_key === null
         ? {}
@@ -756,6 +815,8 @@ function tableCounts(database: DatabaseSync): Record<string, number> {
   const tables = [
     'actors',
     'providers',
+    'resource_kind_definitions',
+    'resource_kind_definition_versions',
     'profiles',
     'profile_versions',
     'policies',
@@ -789,6 +850,7 @@ function revisionTotals(database: DatabaseSync): Record<string, number> {
   const tables = [
     'actors',
     'providers',
+    'resource_kind_definitions',
     'profiles',
     'policies',
     'resources',

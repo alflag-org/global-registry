@@ -11,14 +11,18 @@ import {
   type RegistrySnapshot,
   validateRegistrySnapshot,
 } from '../../src/application/registry-validation';
+import { standardResourceKindDefinition } from '../../src/domain/resource-kind/standard';
+import { STANDARD_RESOURCE_KINDS } from '../../src/domain/models/global-registry';
 
 const timestamp = '2026-07-25T00:00:00.000Z';
 
 function snapshot(): RegistrySnapshot {
+  const definitions = STANDARD_RESOURCE_KINDS.map(standardResourceKindDefinition);
   const location: Resource = {
     id: 'resource-location',
     key: 'site-01',
     kind: 'location',
+    kindVersion: 1,
     name: 'KANAGAWA01',
     placement: {},
     specOverrides: { category: 'site' },
@@ -32,6 +36,7 @@ function snapshot(): RegistrySnapshot {
     id: 'resource-compute',
     key: 'compute-1',
     kind: 'compute',
+    kindVersion: 1,
     name: 'Compute 1',
     placement: { locationKey: 'site-01', zone: 'dmz' },
     specOverrides: {
@@ -82,6 +87,7 @@ function snapshot(): RegistrySnapshot {
     key: 'standard-vm',
     version: 1,
     resourceKind: 'compute',
+    resourceKindVersion: 1,
     spec: {
       allowedArchitectures: ['amd64'],
       memoryMiB: { minimum: 512, maximum: 8192 },
@@ -118,6 +124,29 @@ function snapshot(): RegistrySnapshot {
       },
     ],
     providers: [provider] as unknown as RegistrySnapshot['providers'],
+    resourceKindDefinitions: definitions.map((definition) => ({
+      key: definition.key,
+      status: definition.parentStatus,
+      currentVersion: definition.version,
+      revision: definition.revision,
+      createdAt: definition.createdAt,
+      updatedAt: definition.createdAt,
+    })),
+    resourceKindDefinitionVersions: definitions.map((definition) => ({
+      kindKey: definition.key,
+      version: definition.version,
+      states: [...definition.states],
+      initialState: definition.initialState,
+      terminalStates: [...definition.terminalStates],
+      transitions: definition.transitions.map((transition) => ({ ...transition })),
+      placementMode: definition.placementMode,
+      specificationMode: definition.specificationMode,
+      relationshipRules: definition.relationshipRules.map((rule) => ({
+        ...rule,
+        targetKinds: [...rule.targetKinds],
+      })),
+      createdAt: definition.createdAt,
+    })),
     profiles: [],
     profileVersions: [],
     policies: [
@@ -137,6 +166,7 @@ function snapshot(): RegistrySnapshot {
         policyKey: policy.key,
         version: policy.version,
         resourceKind: policy.resourceKind,
+        resourceKindVersion: policy.resourceKindVersion,
         spec: policy.spec,
         createdAt: policy.createdAt,
         createdBy: 'actor-1',
@@ -197,7 +227,7 @@ describe('registry snapshot validation', () => {
 
   it.each([
     {
-      code: 'invalid_value',
+      code: 'unknown_field',
       mutate(value: RegistrySnapshot) {
         const resource = value.resources[1] as unknown as Resource;
         resource.spec = { ...resource.spec, vmid: 100 };

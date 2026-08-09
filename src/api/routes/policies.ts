@@ -21,6 +21,7 @@ export function registerPolicyRoutes(app: OpenAPIHono<ApiEnvironment>): void {
       namespace: body.namespace,
       key: body.key,
       resourceKind: body.resourceKind,
+      resourceKindVersion: body.resourceKindVersion,
       spec: ensureJsonObject(body.spec, 'spec'),
       actorId: actor(c).id,
       ...(body.expectedRevision === undefined ? {} : { expectedRevision: body.expectedRevision }),

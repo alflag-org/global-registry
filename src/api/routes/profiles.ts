@@ -20,6 +20,7 @@ export function registerProfileRoutes(app: OpenAPIHono<ApiEnvironment>): void {
     const profile = await new ProfileService(repository(c)).createVersion({
       key: body.key,
       resourceKind: body.resourceKind,
+      resourceKindVersion: body.resourceKindVersion,
       spec: ensureJsonObject(body.spec, 'spec'),
       actorId: actor(c).id,
       ...(body.expectedRevision === undefined ? {} : { expectedRevision: body.expectedRevision }),

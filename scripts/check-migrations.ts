@@ -24,6 +24,8 @@ try {
   const expectedTables = [
     'actors',
     'providers',
+    'resource_kind_definitions',
+    'resource_kind_definition_versions',
     'profiles',
     'profile_versions',
     'policies',
@@ -54,6 +56,10 @@ try {
     JSON.stringify(actualTables) === JSON.stringify([...expectedTables].sort()),
     'Schema inventory changed.',
   );
+  const resourceColumns = rows(database, 'PRAGMA table_info(resources)').map((row) =>
+    String(row.name),
+  );
+  assert(resourceColumns.includes('kind_version'), 'Missing resources.kind_version column.');
   const exportColumns = rows(database, 'PRAGMA table_info(exports)').map((row) => String(row.name));
   for (const column of ['claim_token', 'claim_object_key', 'r2_claim_token']) {
     assert(exportColumns.includes(column), `Missing fenced export column ${column}.`);
@@ -82,14 +88,16 @@ try {
     'operation_changes_immutable_update',
     'operation_steps_plan_immutable',
     'events_append_only_delete',
+    'resource_kind_definitions_no_hard_delete',
+    'resource_kind_definition_versions_append_only_update',
   ];
   const actualTriggers = rows(
     database,
     `SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name`,
   ).map((row) => String(row.name));
   triggerCount = actualTriggers.length;
-  assert(actualTables.length === 23, `Expected 23 tables, found ${actualTables.length}.`);
-  assert(actualTriggers.length === 40, `Expected 40 triggers, found ${actualTriggers.length}.`);
+  assert(actualTables.length === 25, `Expected 25 tables, found ${actualTables.length}.`);
+  assert(actualTriggers.length === 45, `Expected 45 triggers, found ${actualTriggers.length}.`);
   assert(
     countMigrationCommands(initialMigration.sql) === 83,
     `Expected 83 commands in frozen ${INITIAL_MIGRATION_FILE}, found ${countMigrationCommands(initialMigration.sql)}.`,
@@ -242,6 +250,39 @@ try {
       ?.driver === 'example.internal',
     'The current schema rejected an extensible provider driver.',
   );
+  database
+    .prepare(
+      `INSERT INTO resource_kind_definitions (
+         key, status, current_version, revision, created_at, updated_at
+       ) VALUES ('example.internal-appliance', 'active', 1, 1, ?, ?)`,
+    )
+    .run(timestamp, timestamp);
+  database
+    .prepare(
+      `INSERT INTO resource_kind_definition_versions (
+         kind_key, version, states_json, initial_state, terminal_states_json,
+         transitions_json, placement_mode, specification_mode,
+         relationship_rules_json, created_at, created_by
+       ) VALUES (
+         'example.internal-appliance', 1, '["absent","ready","retired"]',
+         'absent', '["retired"]',
+         '[{"from":"absent","to":"ready","destructive":false},{"from":"ready","to":"retired","destructive":true}]',
+         'located', 'opaque', '[]', ?, 'actor-1'
+       )`,
+    )
+    .run(timestamp);
+  database
+    .prepare(
+      `INSERT INTO resources (
+         id, key, kind, kind_version, name, placement_json, spec_overrides_json,
+         effective_spec_json, lifecycle_state, created_at, updated_at
+       ) VALUES (
+         'extension-resource', 'extension-resource', 'example.internal-appliance', 1,
+         'Extension resource', '{"locationKey":"placement-root"}', '{}', '{}',
+         'absent', ?, ?
+       )`,
+    )
+    .run(timestamp, timestamp);
   expectFailure(
     () =>
       database
@@ -303,7 +344,7 @@ console.log(
       migrations: migrations.map((migration) => migration.filename),
       frozenInitialSha256: initialMigration.sha256,
       upgradeMigrations: migrations.length - 1,
-      tables: 23,
+      tables: 25,
       triggers: triggerCount,
       freshDatabase: 'ok',
       existingDatabaseUpgrade: 'ok',

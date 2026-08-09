@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { RESOURCE_KINDS } from '../models/global-registry';
 import { providerCapabilitySchema, providerDriverSchema } from '../provider/schemas';
 import { hasUniqueValues } from '../unique-values';
 import {
@@ -244,5 +243,3 @@ export const placementSchema = z
     providerSelector: providerSelectorSchema.optional(),
   })
   .strict();
-
-export const resourceKindSchema = z.enum(RESOURCE_KINDS);

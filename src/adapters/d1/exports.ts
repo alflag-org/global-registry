@@ -45,6 +45,8 @@ import type {
   ProfileRow,
   ProfileVersionRow,
   RelationshipHistoryRow,
+  ResourceKindDefinitionRow,
+  ResourceKindDefinitionVersionRow,
 } from './types';
 
 function now(): string {
@@ -71,6 +73,12 @@ interface PortableExportReader {
 const portableExportReaders: PortableExportReader[] = [
   reader('actors', 'actors', mapActorSnapshot),
   reader('providers', 'providers', mapProvider),
+  reader('resourceKindDefinitions', 'resource_kind_definitions', mapResourceKindDefinition),
+  reader(
+    'resourceKindDefinitionVersions',
+    'resource_kind_definition_versions',
+    mapResourceKindDefinitionVersion,
+  ),
   reader('profiles', 'profiles', mapProfileSnapshot),
   reader('profileVersions', 'profile_versions', mapProfileVersionSnapshot),
   reader('policies', 'policies', mapPolicySnapshot),
@@ -626,6 +634,7 @@ function mapProfileSnapshot(row: ProfileRow) {
   return {
     key: row.key,
     resourceKind: row.resource_kind,
+    resourceKindVersion: row.resource_kind_version,
     status: row.status,
     currentVersion: row.current_version,
     revision: row.revision,
@@ -662,9 +671,37 @@ function mapPolicyVersionSnapshot(row: PolicyVersionRow) {
     policyKey: row.policy_key,
     version: row.version,
     resourceKind: row.resource_kind,
+    resourceKindVersion: row.resource_kind_version,
     spec: parseJsonObject(row.spec_json, 'policy version spec'),
     createdAt: row.created_at,
     createdBy: row.created_by,
+  };
+}
+
+function mapResourceKindDefinition(row: ResourceKindDefinitionRow) {
+  return {
+    key: row.key,
+    status: row.status,
+    currentVersion: row.current_version,
+    revision: row.revision,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapResourceKindDefinitionVersion(row: ResourceKindDefinitionVersionRow) {
+  return {
+    kindKey: row.kind_key,
+    version: row.version,
+    states: JSON.parse(row.states_json) as unknown,
+    initialState: row.initial_state,
+    terminalStates: JSON.parse(row.terminal_states_json) as unknown,
+    transitions: JSON.parse(row.transitions_json) as unknown,
+    placementMode: row.placement_mode,
+    specificationMode: row.specification_mode,
+    relationshipRules: JSON.parse(row.relationship_rules_json) as unknown,
+    createdAt: row.created_at,
+    ...optionalProperty('createdBy', row.created_by),
   };
 }
 

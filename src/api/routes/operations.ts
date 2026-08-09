@@ -30,9 +30,27 @@ import { actor, operationForMutation, repository } from '../environment';
 export function registerOperationRoutes(app: OpenAPIHono<ApiEnvironment>): void {
   app.openapi(createOperationRoute, async (c) => {
     const body = c.req.valid('json');
-    const destructive =
-      body.destructive ||
-      body.resources.some((resource) => isDestructiveLifecycleTransition(resource.targetState));
+    let destructive = body.destructive;
+    for (const planned of body.resources) {
+      if (planned.sourceState === planned.targetState) continue;
+      const resource = await repository(c).getResource(planned.resourceKey);
+      if (resource === null) throw new NotFoundError('Resource', planned.resourceKey);
+      const definition = await repository(c).getResourceKindDefinition(
+        resource.kind,
+        resource.kindVersion,
+      );
+      if (definition === null) {
+        throw new NotFoundError(
+          'Resource kind definition',
+          `${resource.kind}@${resource.kindVersion}`,
+        );
+      }
+      destructive ||= isDestructiveLifecycleTransition(
+        definition,
+        planned.sourceState,
+        planned.targetState,
+      );
+    }
     requireOperationRole(actor(c), { destructive });
     const operation = await new OperationService(repository(c)).create({
       actorId: actor(c).id,

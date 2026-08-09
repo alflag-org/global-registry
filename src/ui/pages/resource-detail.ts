@@ -1,6 +1,11 @@
 import type { ResourceDetail } from '../../application/ports';
 import { lifecycleTransitions } from '../../domain/lifecycle/lifecycle';
-import type { Actor, AuditEvent, Resource } from '../../domain/models/global-registry';
+import type {
+  Actor,
+  AuditEvent,
+  Resource,
+  ResourceKindDefinitionVersion,
+} from '../../domain/models/global-registry';
 import { renderFormStatus, renderSelect } from '../components/form';
 import {
   renderDefinitionList,
@@ -35,11 +40,15 @@ function renderRelationshipTable(
   });
 }
 
-function renderLifecycleForm(actor: Actor, resource: Resource): string {
+function renderLifecycleForm(
+  actor: Actor,
+  resource: Resource,
+  definition: ResourceKindDefinitionVersion,
+): string {
   if (actor.role !== 'provisioner' && actor.role !== 'operator') {
     return renderNotice('操作の作成にはプロビジョナーまたはオペレーター権限が必要です。');
   }
-  const transitions = lifecycleTransitions(resource.kind)[resource.lifecycleState] ?? [];
+  const transitions = lifecycleTransitions(definition, resource.lifecycleState);
   if (transitions.length === 0) return renderEmpty('遷移可能な状態はありません。');
   return `<form class="form-grid" action="/api/v1/operations" method="post" data-operation-form data-resource-key="${escapeHtmlAttribute(resource.key)}" data-source-state="${escapeHtmlAttribute(resource.lifecycleState)}" data-resource-revision="${resource.revision}">
     ${renderSelect({
@@ -47,8 +56,8 @@ function renderLifecycleForm(actor: Actor, resource: Resource): string {
       name: 'targetState',
       label: '変更先の状態',
       options: transitions.map((transition) => ({
-        value: transition,
-        label: labelValue(transition),
+        value: transition.to,
+        label: labelValue(transition.to),
       })),
       required: true,
     })}
@@ -64,6 +73,7 @@ export function renderResourceDetailPage(input: {
   allResources: readonly Resource[];
   events: readonly AuditEvent[];
   actor: Actor;
+  definition: ResourceKindDefinitionVersion;
   query: { relationshipCursor?: string; driftCursor?: string };
 }): UiPageContent {
   const { detail, events } = input;
@@ -116,7 +126,7 @@ export function renderResourceDetailPage(input: {
     title: resource.key,
     body: `${renderPageHeader(
       resource.key,
-      `${resource.name} · ${labelValue(resource.kind)} · r${resource.revision}`,
+      `${resource.name} · ${labelValue(resource.kind)} v${resource.kindVersion} · r${resource.revision}`,
     )}
       <div class="stack">
         ${renderSection(
@@ -140,7 +150,7 @@ export function renderResourceDetailPage(input: {
             },
           ]),
         )}
-        ${renderSection('操作', '', renderLifecycleForm(input.actor, resource))}
+        ${renderSection('操作', '', renderLifecycleForm(input.actor, resource, input.definition))}
         ${renderSection('ドリフト', `${detail.drifts.length}${detail.driftsNextCursor === undefined ? '' : '+'}件`, driftContent + (driftNext === '' ? '' : `<p>${driftNext}</p>`))}
         ${renderSection(
           '関係',
