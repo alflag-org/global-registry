@@ -7,9 +7,8 @@ export {
   MAX_OUTBOX_CONSUMER_ATTEMPTS,
   MAX_OUTBOX_DISPATCH_WORK,
   MAX_OUTBOX_PRODUCER_ATTEMPTS,
-  MAX_PORTABLE_EXPORT_BYTES,
-  MAX_PORTABLE_EXPORT_ROWS_PER_TABLE,
-  MAX_PORTABLE_EXPORT_TOTAL_ROWS,
+  MAX_PORTABLE_EXPORT_OBJECT_BYTES,
+  MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK,
   PORTABLE_EXPORT_QUERY_LIMIT,
   PORTABLE_EXPORT_SCHEMA_VERSION,
 } from './limits';
@@ -18,10 +17,18 @@ export type { PolicySummary } from './policies';
 import type { ProfileSummary } from './profiles';
 import type { PolicySummary } from './policies';
 import type { CreateResource, UpdateResource } from '../domain/models/global-registry';
-export { assertValidRegistrySnapshot } from './registry-validation';
-export { serializePortableSnapshot } from './registry-snapshot';
-export type { PortableRegistrySnapshot } from './registry-snapshot';
-import type { PortableRegistrySnapshot } from './registry-snapshot';
+export type {
+  PortableExportChunk,
+  PortableExportChunkReference,
+  PortableExportEntity,
+  PortableExportManifest,
+} from './registry-snapshot';
+export {
+  assertPortableExportManifest,
+  manifestChecksumPayload,
+  serializePortableExportObject,
+} from './registry-snapshot';
+import type { PortableExportChunk } from './registry-snapshot';
 import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
@@ -233,7 +240,14 @@ export interface ExportAttempt {
 export interface ExportPersistencePort {
   getExport(id: string): Promise<ExportRecord | null>;
   claimExport(id: string, now?: string): Promise<ExportAttempt | null>;
-  buildPortableSnapshot(): Promise<PortableRegistrySnapshot>;
+  renewExportLease(input: {
+    exportId: string;
+    revision: number;
+    objectKey: string;
+    claimToken: string;
+  }): Promise<void>;
+  validatePortableExportSource(): Promise<void>;
+  readPortableExportChunks(exportId: string): AsyncIterable<PortableExportChunk>;
   completeExport(input: {
     exportId: string;
     revision: number;

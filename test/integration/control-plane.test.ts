@@ -1,7 +1,12 @@
 import { env } from 'cloudflare:workers';
 import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { validateRegistrySnapshot } from '../../src/application/registry-validation';
+import {
+  assertPortableExportChunk,
+  assertPortableExportManifest,
+  manifestChecksumPayload,
+  PORTABLE_EXPORT_ENTITIES,
+} from '../../src/application/registry-snapshot';
 import { D1GlobalRegistryRepository } from '../../src/adapters/d1/repository';
 import { R2ExportWriter } from '../../src/adapters/r2/exporter';
 import { R2ObservationArchiver } from '../../src/adapters/r2/observation-archiver';
@@ -18,6 +23,13 @@ function asRecord(value: unknown): JsonRecord {
 function exportsBucket(): R2Bucket {
   if (env.EXPORTS_BUCKET === undefined) throw new Error('test R2 binding is unavailable');
   return env.EXPORTS_BUCKET;
+}
+
+async function checksum(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')}`;
 }
 
 function headers(identity: string, json = false): Headers {
@@ -1528,15 +1540,24 @@ describe.sequential('control-plane API', () => {
 
     const object = await exportsBucket().get(completed?.r2ObjectKey ?? 'missing');
     expect(object).not.toBeNull();
-    const contents = await object?.text();
-    expect(contents).toContain('"resources"');
-    expect(contents).toContain('"outbox"');
-    expect(contents).toContain('"relationshipHistory"');
-    expect(contents).toContain('"operationChanges"');
-    expect(validateRegistrySnapshot(JSON.parse(contents ?? 'null'))).toMatchObject({
-      valid: true,
-      violations: [],
-    });
+    const manifestBody = (await object?.text()) ?? '';
+    const manifest = assertPortableExportManifest(JSON.parse(manifestBody || 'null'));
+    expect(manifest.checksum).toBe(await checksum(manifestChecksumPayload(manifest)));
+    expect(completed?.checksum).toBe(await checksum(manifestBody));
+    expect(manifest.chunks.map((chunk) => chunk.entity)).toEqual(PORTABLE_EXPORT_ENTITIES);
+    for (const reference of manifest.chunks) {
+      const chunkObject = await exportsBucket().get(reference.key);
+      expect(chunkObject).not.toBeNull();
+      const body = await chunkObject?.text();
+      expect(reference.checksum).toBe(await checksum(body ?? ''));
+      const chunk = assertPortableExportChunk(JSON.parse(body ?? 'null'));
+      expect(chunk).toMatchObject({
+        exportId: manifest.exportId,
+        entity: reference.entity,
+        sequence: reference.sequence,
+      });
+      expect(chunk.rows).toHaveLength(reference.rows);
+    }
 
     const exportEvents = await env.DB.prepare(
       `SELECT event.event_type

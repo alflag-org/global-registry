@@ -2,23 +2,23 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_EXPORT_ATTEMPTS,
   MAX_EXPORT_RETENTION_WORK,
-  MAX_PORTABLE_EXPORT_BYTES,
-  MAX_PORTABLE_EXPORT_ROWS_PER_TABLE,
-  MAX_PORTABLE_EXPORT_TOTAL_ROWS,
+  MAX_PORTABLE_EXPORT_OBJECT_BYTES,
+  MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK,
   PORTABLE_EXPORT_SCHEMA_VERSION,
 } from '../../src/application/limits';
-import type {
-  ExportPersistencePort,
-  OutboxPersistencePort,
-  PortableRegistrySnapshot,
-} from '../../src/application/ports';
+import type { ExportPersistencePort, OutboxPersistencePort } from '../../src/application/ports';
 import {
-  assertPortableExportRowCapacity,
-  serializePortableSnapshot,
+  assertPortableExportChunk,
+  assertPortableExportManifest,
+  manifestChecksumPayload,
+  PORTABLE_EXPORT_ENTITIES,
+  serializePortableExportObject,
+  type PortableExportChunk,
+  type PortableExportManifest,
 } from '../../src/application/registry-snapshot';
-import { R2ExportWriter } from '../../src/adapters/r2/exporter';
 import { D1Exports } from '../../src/adapters/d1/exports';
 import { consumeOutboxBatch } from '../../src/adapters/queue/outbox-consumer';
+import { R2ExportWriter } from '../../src/adapters/r2/exporter';
 import type { ExportRecord } from '../../src/domain/models/global-registry';
 
 interface StoredObject {
@@ -31,7 +31,9 @@ class MemoryExportStore implements ExportPersistencePort {
   readonly claims = new Map<string, { revision: number; objectKey: string; claimToken: string }>();
   failNextCompletion = false;
   throwAfterCompletion = false;
-  invalidSnapshot = false;
+  invalidChunk = false;
+  sourceValidationCalls = 0;
+  renewalCalls = 0;
   beforeCompletion:
     | ((input: {
         exportId: string;
@@ -82,7 +84,7 @@ class MemoryExportStore implements ExportPersistencePort {
     record.leaseUntil = new Date(Date.parse(claimedAt) + 5 * 60_000).toISOString();
     delete record.errorMessage;
     const claimToken = crypto.randomUUID();
-    const objectKey = `exports/${encodeURIComponent(id)}/${record.revision}-${claimToken}.json`;
+    const objectKey = `exports/${encodeURIComponent(id)}/${record.revision}-${claimToken}/manifest.json`;
     this.claims.set(id, { revision: record.revision, objectKey, claimToken });
     return {
       exportId: id,
@@ -95,14 +97,40 @@ class MemoryExportStore implements ExportPersistencePort {
     };
   }
 
-  async buildPortableSnapshot(): Promise<PortableRegistrySnapshot> {
-    if (this.invalidSnapshot) {
-      return {
-        ...emptySnapshot(),
-        exports: [{ bad: true }],
-      } as unknown as PortableRegistrySnapshot;
+  async validatePortableExportSource(): Promise<void> {
+    this.sourceValidationCalls += 1;
+  }
+
+  async renewExportLease(input: {
+    exportId: string;
+    revision: number;
+    objectKey: string;
+    claimToken: string;
+  }): Promise<void> {
+    this.renewalCalls += 1;
+    const record = this.records.get(input.exportId);
+    const claim = this.claims.get(input.exportId);
+    if (
+      record?.status !== 'running' ||
+      record.revision !== input.revision ||
+      claim?.objectKey !== input.objectKey ||
+      claim.claimToken !== input.claimToken
+    ) {
+      throw new Error('export_lease_conflict');
     }
-    return emptySnapshot();
+    record.leaseUntil = new Date(Date.now() + 5 * 60_000).toISOString();
+  }
+
+  async *readPortableExportChunks(exportId: string): AsyncIterable<PortableExportChunk> {
+    for (const entity of PORTABLE_EXPORT_ENTITIES) {
+      yield assertPortableExportChunk({
+        schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
+        exportId,
+        entity,
+        sequence: 1,
+        rows: this.invalidChunk && entity === 'actors' ? [{ bad: true }] : [],
+      });
+    }
   }
 
   async completeExport(input: {
@@ -126,7 +154,7 @@ class MemoryExportStore implements ExportPersistencePort {
       record.revision !== input.revision ||
       record.status !== 'running' ||
       claim?.claimToken !== input.claimToken ||
-      claim?.objectKey !== input.objectKey
+      claim.objectKey !== input.objectKey
     ) {
       throw new Error('export_lease_conflict');
     }
@@ -197,361 +225,315 @@ class MemoryExportStore implements ExportPersistencePort {
 function memoryBucket(): {
   bucket: R2Bucket;
   objects: Map<string, StoredObject>;
-  putCount: () => number;
   putKeys: string[];
   deletedKeys: string[];
 } {
   const objects = new Map<string, StoredObject>();
   const deletedKeys: string[] = [];
   const putKeys: string[] = [];
-  let puts = 0;
   const bucket = {
     head: async (key: string) => {
       const object = objects.get(key);
       return object === undefined
         ? null
-        : ({ customMetadata: object.customMetadata } as unknown as R2Object);
+        : ({ key, customMetadata: object.customMetadata } as unknown as R2Object);
     },
     get: async (key: string) => {
       const object = objects.get(key);
       return object === undefined
         ? null
-        : ({
-            body: new ReadableStream({
-              start(controller) {
-                controller.enqueue(new TextEncoder().encode(object.body));
-                controller.close();
-              },
-            }),
-          } as unknown as R2ObjectBody);
+        : ({ text: async () => object.body } as unknown as R2ObjectBody);
     },
     put: async (
       key: string,
       value: unknown,
       options?: { customMetadata?: Record<string, string> },
     ) => {
-      puts += 1;
       putKeys.push(key);
       objects.set(key, {
         body: typeof value === 'string' ? value : String(value),
         customMetadata: options?.customMetadata ?? {},
       });
-      return undefined as never;
+      return { key } as unknown as R2Object;
     },
-    delete: async (key: string) => {
-      deletedKeys.push(key);
-      objects.delete(key);
+    delete: async (input: string | string[]) => {
+      for (const key of Array.isArray(input) ? input : [input]) {
+        deletedKeys.push(key);
+        objects.delete(key);
+      }
+    },
+    list: async (options?: { prefix?: string }) => {
+      const prefix = options?.prefix ?? '';
+      return {
+        objects: [...objects.keys()]
+          .filter((key) => key.startsWith(prefix))
+          .sort()
+          .map((key) => ({ key })),
+        truncated: false,
+      } as unknown as R2Objects;
     },
   } as unknown as R2Bucket;
-  return { bucket, objects, putCount: () => puts, putKeys, deletedKeys };
+  return { bucket, objects, putKeys, deletedKeys };
 }
 
-describe('retry-safe export completion', () => {
-  it('enforces portable row and serialized-byte capacity at the boundary', () => {
-    expect(() =>
-      assertPortableExportRowCapacity([Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_TABLE })]),
-    ).not.toThrow();
-    expect(() =>
-      assertPortableExportRowCapacity([
-        Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_TABLE + 1 }),
-      ]),
-    ).toThrow('portable_export_capacity_exceeded');
-    expect(() =>
-      assertPortableExportRowCapacity(
-        Array.from(
-          { length: MAX_PORTABLE_EXPORT_TOTAL_ROWS / MAX_PORTABLE_EXPORT_ROWS_PER_TABLE },
-          () => Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_TABLE }),
-        ),
-      ),
-    ).not.toThrow();
-    expect(() =>
-      assertPortableExportRowCapacity(
-        Array.from(
-          { length: MAX_PORTABLE_EXPORT_TOTAL_ROWS / MAX_PORTABLE_EXPORT_ROWS_PER_TABLE },
-          () => Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_TABLE }),
-        ).concat([Array.from({ length: 1 })]),
-      ),
-    ).toThrow('portable_export_capacity_exceeded');
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')}`;
+}
 
-    const actor = {
-      id: 'actor-capacity',
-      identity: 'access:actor-capacity',
-      displayName: '',
-      role: 'admin' as const,
-      active: true,
-      revision: 1,
-      createdAt: '2026-08-01T00:00:00.000Z',
-      updatedAt: '2026-08-01T00:00:00.000Z',
-      createdBy: 'actor-capacity',
-      updatedBy: 'actor-capacity',
-    };
-    const emptyBody = serializePortableSnapshot({ ...emptySnapshot(), actors: [actor] });
-    const padding = 'a'.repeat(
-      MAX_PORTABLE_EXPORT_BYTES - new TextEncoder().encode(emptyBody).byteLength,
-    );
-    expect(
-      new TextEncoder().encode(
-        serializePortableSnapshot({
-          ...emptySnapshot(),
-          actors: [{ ...actor, displayName: padding }],
-        }),
-      ).byteLength,
-    ).toBe(MAX_PORTABLE_EXPORT_BYTES);
+async function assertCompleteStoredExport(
+  store: MemoryExportStore,
+  storage: ReturnType<typeof memoryBucket>,
+): Promise<PortableExportManifest> {
+  const record = store.records.get('exp-test');
+  const manifestObject = storage.objects.get(record?.r2ObjectKey ?? '');
+  expect(manifestObject).toBeDefined();
+  const manifest = assertPortableExportManifest(JSON.parse(manifestObject?.body ?? 'null'));
+  expect(manifest.checksum).toBe(await sha256(manifestChecksumPayload(manifest)));
+  expect(record?.checksum).toBe(await sha256(manifestObject?.body ?? ''));
+  expect(manifestObject?.customMetadata).toMatchObject({
+    checksum: record?.checksum,
+    manifestChecksum: manifest.checksum,
+  });
+  for (const reference of manifest.chunks) {
+    const chunk = storage.objects.get(reference.key);
+    expect(chunk).toBeDefined();
+    expect(reference.checksum).toBe(await sha256(chunk?.body ?? ''));
+    const parsedChunk = assertPortableExportChunk(JSON.parse(chunk?.body ?? 'null'));
+    expect(parsedChunk).toMatchObject({
+      exportId: manifest.exportId,
+      entity: reference.entity,
+      sequence: reference.sequence,
+    });
+    expect(parsedChunk.rows).toHaveLength(reference.rows);
+  }
+  return manifest;
+}
+
+describe('chunked portable exports', () => {
+  it('bounds individual objects without imposing an export-wide row ceiling', () => {
     expect(() =>
-      serializePortableSnapshot({
-        ...emptySnapshot(),
-        actors: [{ ...actor, displayName: `${padding}a` }],
+      assertPortableExportChunk({
+        schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
+        exportId: 'exp-test',
+        entity: 'events',
+        sequence: 1,
+        rows: Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK + 1 }),
       }),
-    ).toThrow('portable_export_capacity_exceeded');
+    ).toThrow();
+    expect(() =>
+      serializePortableExportObject('a'.repeat(MAX_PORTABLE_EXPORT_OBJECT_BYTES)),
+    ).toThrow('portable_export_object_too_large');
   });
 
-  it('uses one D1 batch for the complete 23-table empty snapshot', async () => {
-    const statements: string[] = [];
-    let batchCalls = 0;
+  it('reads more than 1,000 rows from one D1 entity as consecutive bounded chunks', async () => {
+    const actors = Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK + 1 }, (_, index) => ({
+      __export_cursor: index + 1,
+      id: `actor-${index}`,
+      identity: `access:actor-${index}`,
+      display_name: `Actor ${index}`,
+      role: index === 0 ? 'admin' : 'operator',
+      active: 1,
+      revision: 1,
+      created_at: '2026-08-01T00:00:00.000Z',
+      updated_at: '2026-08-01T00:00:00.000Z',
+      created_by: 'actor-0',
+      updated_by: 'actor-0',
+    }));
     const database = {
       prepare(sql: string) {
-        statements.push(sql);
+        let parameters: unknown[] = [];
         const statement = {
-          bind: () => statement,
+          bind: (...values: unknown[]) => {
+            parameters = values;
+            return statement;
+          },
+          all: async () => {
+            if (!sql.includes('FROM actors')) return { results: [], success: true };
+            const [cursor, ceiling, limit] = parameters as number[];
+            return {
+              results: actors
+                .filter((row) => row.__export_cursor > cursor! && row.__export_cursor <= ceiling!)
+                .slice(0, limit),
+              success: true,
+            };
+          },
         };
         return statement;
       },
-      batch: async (batchStatements: unknown[]) => {
-        batchCalls += 1;
-        return batchStatements.map(() => ({ success: true, results: [] }));
-      },
-    } as unknown as D1Database;
-
-    const snapshot = await new D1Exports(database).buildPortableSnapshot();
-
-    expect(batchCalls).toBe(1);
-    expect(statements).toHaveLength(23);
-    expect(statements.every((statement) => statement.includes('LIMIT ?'))).toBe(true);
-    expect(snapshot.actors).toEqual([]);
-    expect(snapshot.exports).toEqual([]);
-  });
-
-  it('fails before row mapping when a bounded D1 query reports one extra row', async () => {
-    const database = {
-      prepare(sql: string) {
-        const statement = {
-          bind: () => statement,
-        };
-        void sql;
-        return statement;
-      },
-      batch: async (batchStatements: unknown[]) =>
-        batchStatements.map((_, index) => ({
+      batch: async (statements: unknown[]) =>
+        statements.map((_, index) => ({
           success: true,
-          results:
-            index === 0 ? Array.from({ length: MAX_PORTABLE_EXPORT_ROWS_PER_TABLE + 1 }) : [],
+          results: [{ max_rowid: index === 0 ? actors.length : 0 }],
         })),
     } as unknown as D1Database;
 
-    await expect(new D1Exports(database).buildPortableSnapshot()).rejects.toThrow(
-      'portable_export_capacity_exceeded',
-    );
+    const chunks: PortableExportChunk[] = [];
+    for await (const chunk of new D1Exports(database).readPortableExportChunks('exp-many')) {
+      chunks.push(chunk);
+    }
+
+    const actorChunks = chunks.filter((chunk) => chunk.entity === 'actors');
+    expect(actorChunks.map((chunk) => [chunk.sequence, chunk.rows.length])).toEqual([
+      [1, MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK],
+      [2, 1],
+    ]);
+    expect(chunks).toHaveLength(PORTABLE_EXPORT_ENTITIES.length + 1);
   });
 
-  it('reconciles an object after D1 completion fails following the R2 write', async () => {
+  it('writes one validated chunk per entity and a checksummed manifest last', async () => {
     const store = new MemoryExportStore();
     const storage = memoryBucket();
-    const writer = new R2ExportWriter(store, storage.bucket);
-    store.failNextCompletion = true;
 
-    await expect(writer.write('exp-test')).rejects.toThrow('export_processing_failed');
+    await new R2ExportWriter(store, storage.bucket).write('exp-test');
+
+    expect(store.sourceValidationCalls).toBe(1);
+    expect(store.renewalCalls).toBe(PORTABLE_EXPORT_ENTITIES.length);
+    expect(store.records.get('exp-test')?.status).toBe('succeeded');
+    expect(storage.putKeys.at(-1)).toBe(store.records.get('exp-test')?.r2ObjectKey);
+    const manifest = await assertCompleteStoredExport(store, storage);
+    expect(manifest.chunks).toHaveLength(PORTABLE_EXPORT_ENTITIES.length);
+    expect(manifest.chunks.map((chunk) => chunk.entity)).toEqual(PORTABLE_EXPORT_ENTITIES);
+  });
+
+  it('rejects an invalid entity row before writing that chunk and cleans the claim prefix', async () => {
+    const store = new MemoryExportStore();
+    const storage = memoryBucket();
+    store.invalidChunk = true;
+
+    await expect(new R2ExportWriter(store, storage.bucket).write('exp-test')).rejects.toThrow(
+      'export_processing_failed',
+    );
+
     expect(store.records.get('exp-test')?.status).toBe('failed');
     expect(storage.objects.size).toBe(0);
-    const failedClaimKey = storage.putKeys[0];
-    expect(failedClaimKey).toBeDefined();
-    expect(storage.deletedKeys).toContain(failedClaimKey);
-
-    await writer.write('exp-test');
-
-    expect(store.records.get('exp-test')?.status).toBe('succeeded');
-    expect(storage.putCount()).toBe(2);
-    expect(storage.objects.size).toBe(1);
-    expect(storage.putKeys[1]).not.toBe(failedClaimKey);
   });
 
-  it('keeps the object when D1 completion succeeded but its response was lost', async () => {
+  it('removes every claim-owned object when D1 completion fails', async () => {
     const store = new MemoryExportStore();
     const storage = memoryBucket();
-    const writer = new R2ExportWriter(store, storage.bucket);
+    store.failNextCompletion = true;
+
+    await expect(new R2ExportWriter(store, storage.bucket).write('exp-test')).rejects.toThrow(
+      'export_processing_failed',
+    );
+
+    expect(store.records.get('exp-test')?.status).toBe('failed');
+    expect(storage.objects.size).toBe(0);
+    expect(storage.deletedKeys).toHaveLength(PORTABLE_EXPORT_ENTITIES.length + 1);
+
+    await new R2ExportWriter(store, storage.bucket).write('exp-test');
+    expect(storage.objects.size).toBe(PORTABLE_EXPORT_ENTITIES.length + 1);
+    await assertCompleteStoredExport(store, storage);
+  });
+
+  it('keeps all authoritative objects when D1 completion succeeded but its response was lost', async () => {
+    const store = new MemoryExportStore();
+    const storage = memoryBucket();
     store.throwAfterCompletion = true;
 
-    await expect(writer.write('exp-test')).rejects.toThrow('export_processing_failed');
+    await expect(new R2ExportWriter(store, storage.bucket).write('exp-test')).rejects.toThrow(
+      'export_processing_failed',
+    );
 
-    const completed = store.records.get('exp-test');
-    expect(completed?.status).toBe('succeeded');
-    expect(completed?.r2ObjectKey).toBe(storage.putKeys[0]);
-    expect(storage.objects.size).toBe(1);
-    expect(storage.deletedKeys).not.toContain(storage.putKeys[0]);
+    expect(store.records.get('exp-test')?.status).toBe('succeeded');
+    expect(storage.deletedKeys).toEqual([]);
+    await assertCompleteStoredExport(store, storage);
   });
 
-  it('reclaims a stale running lease and fences its prior object', async () => {
+  it('reclaims a stale lease and deletes the superseded claim prefix', async () => {
     const store = new MemoryExportStore();
     const storage = memoryBucket();
-    const writer = new R2ExportWriter(store, storage.bucket);
-    const attempt = await store.claimExport('exp-test', '2026-08-01T00:00:00.000Z');
-    if (attempt === null) throw new Error('Expected an initial export lease.');
-    const body = serializePortableSnapshot(await store.buildPortableSnapshot());
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-    const checksum = `sha256:${Array.from(new Uint8Array(digest), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('')}`;
-    await storage.bucket.put(attempt.objectKey, body, {
-      customMetadata: {
-        exportId: 'exp-test',
-        checksum,
-        schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
-        claimToken: attempt.claimToken,
-        revision: String(attempt.revision),
-      },
-    });
+    const stale = await store.claimExport('exp-test', '2026-08-01T00:00:00.000Z');
+    if (stale === null) throw new Error('Expected a stale claim.');
+    const stalePrefix = stale.objectKey.slice(0, -'manifest.json'.length);
+    await storage.bucket.put(`${stalePrefix}events-000001.json`, '{}');
+    await storage.bucket.put(stale.objectKey, '{}');
     const record = store.records.get('exp-test');
     if (record === undefined) throw new Error('Expected an export record.');
     record.leaseUntil = '2000-01-01T00:00:00.000Z';
 
-    await writer.write('exp-test');
+    await new R2ExportWriter(store, storage.bucket).write('exp-test');
 
     expect(record.status).toBe('succeeded');
     expect(record.attempts).toBe(2);
-    expect(storage.putCount()).toBe(2);
-    expect(storage.objects.size).toBe(1);
-    expect(storage.deletedKeys).toContain(attempt.objectKey);
-    expect(storage.putKeys[1]).not.toBe(attempt.objectKey);
+    expect([...storage.objects.keys()].some((key) => key.startsWith(stalePrefix))).toBe(false);
+    await assertCompleteStoredExport(store, storage);
   });
 
-  it('recovers a stale running lease after the bounded write attempts are exhausted', async () => {
+  it('cleans a superseded schema 1.1 object without adopting an unrelated stable key', async () => {
     const store = new MemoryExportStore();
     const storage = memoryBucket();
-    const writer = new R2ExportWriter(store, storage.bucket);
-    const record = store.records.get('exp-test');
-    if (record === undefined) throw new Error('Expected an export record.');
-    const staleClaim = await store.claimExport('exp-test', '2026-08-01T00:00:00.000Z');
-    if (staleClaim === null) throw new Error('Expected a stale export lease.');
-    record.attempts = MAX_EXPORT_ATTEMPTS;
-    record.leaseUntil = '2000-01-01T00:00:00.000Z';
-    const body = serializePortableSnapshot(await store.buildPortableSnapshot());
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-    const checksum = `sha256:${Array.from(new Uint8Array(digest), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('')}`;
-    await storage.bucket.put(staleClaim.objectKey, body, {
+    const stale = await store.claimExport('exp-test', '2026-08-01T00:00:00.000Z');
+    if (stale === null) throw new Error('Expected a stale claim.');
+    const legacyKey = `exports/exp-test/${stale.revision}-${stale.claimToken}.json`;
+    store.claims.set('exp-test', {
+      revision: stale.revision,
+      objectKey: legacyKey,
+      claimToken: stale.claimToken,
+    });
+    await storage.bucket.put(legacyKey, '{"schemaVersion":"1.1"}', {
       customMetadata: {
         exportId: 'exp-test',
-        checksum,
-        schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
-        claimToken: staleClaim.claimToken,
-        revision: String(staleClaim.revision),
+        claimToken: stale.claimToken,
+        revision: String(stale.revision),
       },
     });
+    await storage.bucket.put('exports/exp-test.json', '{"unrelated":true}');
+    const record = store.records.get('exp-test');
+    if (record === undefined) throw new Error('Expected an export record.');
+    record.leaseUntil = '2000-01-01T00:00:00.000Z';
 
-    await writer.write('exp-test');
+    await new R2ExportWriter(store, storage.bucket).write('exp-test');
 
-    expect(record.status).toBe('succeeded');
-    expect(record.attempts).toBe(MAX_EXPORT_ATTEMPTS);
-    expect(storage.putCount()).toBe(2);
-    expect(storage.objects.size).toBe(1);
-    expect(storage.deletedKeys).toContain(staleClaim.objectKey);
-    expect(storage.putKeys[1]).not.toBe(staleClaim.objectKey);
+    expect(storage.objects.has(legacyKey)).toBe(false);
+    expect(storage.objects.has('exports/exp-test.json')).toBe(true);
+    await assertCompleteStoredExport(store, storage);
   });
 
-  it('fences a final-attempt loser while a stale recovery claim completes', async () => {
+  it('fences a losing final attempt while a stale recovery claim completes', async () => {
     const store = new MemoryExportStore();
     const storage = memoryBucket();
-    const loserWriter = new R2ExportWriter(store, storage.bucket);
-    const winnerWriter = new R2ExportWriter(store, storage.bucket);
     const record = store.records.get('exp-test');
     if (record === undefined) throw new Error('Expected an export record.');
     record.attempts = MAX_EXPORT_ATTEMPTS - 1;
 
     let releaseLoser: (() => void) | undefined;
-    let loserCompletionReached: (input: { objectKey: string; claimToken: string }) => void = () =>
-      undefined;
-    const reached = new Promise<{ objectKey: string; claimToken: string }>((resolve) => {
-      loserCompletionReached = resolve;
+    let completionReached: (key: string) => void = () => undefined;
+    const reached = new Promise<string>((resolve) => {
+      completionReached = resolve;
     });
     store.beforeCompletion = async (input) => {
       record.leaseUntil = '2000-01-01T00:00:00.000Z';
-      loserCompletionReached({ objectKey: input.objectKey, claimToken: input.claimToken });
+      completionReached(input.objectKey);
       await new Promise<void>((resolve) => {
         releaseLoser = resolve;
       });
     };
 
-    const loserPromise = loserWriter.write('exp-test');
-    const loserClaim = await reached;
-    expect(record.attempts).toBe(MAX_EXPORT_ATTEMPTS);
-    expect(storage.objects.has(loserClaim.objectKey)).toBe(true);
-
-    await winnerWriter.write('exp-test');
+    const loser = new R2ExportWriter(store, storage.bucket).write('exp-test');
+    const loserManifest = await reached;
+    const loserPrefix = loserManifest.slice(0, -'manifest.json'.length);
+    await new R2ExportWriter(store, storage.bucket).write('exp-test');
     releaseLoser?.();
-    await expect(loserPromise).rejects.toThrow('export_processing_failed');
+    await expect(loser).rejects.toThrow('export_processing_failed');
 
     expect(record.status).toBe('succeeded');
     expect(record.attempts).toBe(MAX_EXPORT_ATTEMPTS);
-    expect(storage.objects.size).toBe(1);
-    expect(storage.objects.has(loserClaim.objectKey)).toBe(false);
-    expect(storage.deletedKeys).toContain(loserClaim.objectKey);
-    const winnerKey = record.r2ObjectKey;
-    expect(winnerKey).toBeDefined();
-    const winner = storage.objects.get(winnerKey ?? '');
-    expect(winner).toBeDefined();
-    const winnerDigest = await crypto.subtle.digest(
-      'SHA-256',
-      new TextEncoder().encode(winner?.body ?? ''),
-    );
-    expect(winner?.customMetadata.checksum).toBe(
-      `sha256:${Array.from(new Uint8Array(winnerDigest), (byte) =>
-        byte.toString(16).padStart(2, '0'),
-      ).join('')}`,
-    );
+    expect([...storage.objects.keys()].some((key) => key.startsWith(loserPrefix))).toBe(false);
+    await assertCompleteStoredExport(store, storage);
   });
 
-  it('rejects an invalid snapshot before any R2 write', async () => {
-    const store = new MemoryExportStore();
-    const storage = memoryBucket();
-    const writer = new R2ExportWriter(store, storage.bucket);
-    store.invalidSnapshot = true;
-
-    await expect(writer.write('exp-test')).rejects.toThrow('export_processing_failed');
-
-    expect(storage.putCount()).toBe(0);
-    expect(store.records.get('exp-test')?.status).toBe('failed');
-  });
-
-  it('does not adopt an unrelated object at an old stable-looking key', async () => {
-    const store = new MemoryExportStore();
-    const storage = memoryBucket();
-    const writer = new R2ExportWriter(store, storage.bucket);
-    const body = JSON.stringify({ schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION });
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
-    const checksum = `sha256:${Array.from(new Uint8Array(digest), (byte) =>
-      byte.toString(16).padStart(2, '0'),
-    ).join('')}`;
-    await storage.bucket.put('exports/exp-test.json', body, {
-      customMetadata: {
-        exportId: 'exp-test',
-        checksum,
-        schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
-      },
-    });
-
-    await writer.write('exp-test');
-
-    expect(storage.putCount()).toBe(2);
-    expect(store.records.get('exp-test')?.status).toBe('succeeded');
-    expect(storage.objects.has('exports/exp-test.json')).toBe(true);
-  });
-
-  it('processes retention in bounded ordered batches without skipping or repeating records', async () => {
+  it('deletes every object below each retained manifest prefix before expiring D1 records', async () => {
     const store = new MemoryExportStore();
     const storage = memoryBucket();
     const writer = new R2ExportWriter(store, storage.bucket);
     for (let index = 0; index < MAX_EXPORT_RETENTION_WORK + 2; index += 1) {
       const id = `expired-${String(index).padStart(3, '0')}`;
+      const prefix = `exports/${id}/2-token-${index}/`;
+      const manifestKey = `${prefix}manifest.json`;
       store.records.set(id, {
         id,
         schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
@@ -561,25 +543,20 @@ describe('retry-safe export completion', () => {
         createdAt: '2025-01-01T00:00:00.000Z',
         completedAt: new Date(Date.UTC(2025, 0, index + 1)).toISOString(),
         requestedBy: 'actor-admin',
-        r2ObjectKey: `exports/${id}.json`,
+        r2ObjectKey: manifestKey,
         checksum: `sha256:${'a'.repeat(64)}`,
       });
+      await storage.bucket.put(manifestKey, '{}');
+      await storage.bucket.put(`${prefix}events-000001.json`, '{}');
     }
 
-    await expect(
-      writer.pruneRetention('actor-admin', new Date('2026-08-01T00:00:00.000Z')),
-    ).resolves.toBe(MAX_EXPORT_RETENTION_WORK);
-    await expect(
-      writer.pruneRetention('actor-admin', new Date('2026-08-01T00:00:00.000Z')),
-    ).resolves.toBe(2);
+    await expect(writer.pruneRetention('actor-admin', new Date('2026-08-01'))).resolves.toBe(
+      MAX_EXPORT_RETENTION_WORK,
+    );
+    await expect(writer.pruneRetention('actor-admin', new Date('2026-08-01'))).resolves.toBe(2);
 
-    expect(storage.deletedKeys).toHaveLength(MAX_EXPORT_RETENTION_WORK + 2);
-    expect(new Set(storage.deletedKeys).size).toBe(storage.deletedKeys.length);
-    expect(
-      [...store.records.values()].filter(
-        (record) => record.id.startsWith('expired-') && record.expiredAt === undefined,
-      ),
-    ).toHaveLength(0);
+    expect(storage.objects.size).toBe(0);
+    expect(storage.deletedKeys).toHaveLength((MAX_EXPORT_RETENTION_WORK + 2) * 2);
   });
 });
 
@@ -593,13 +570,15 @@ describe('outbox export acknowledgement', () => {
     const repository = {
       getExport: store.getExport.bind(store),
       claimExport: store.claimExport.bind(store),
-      buildPortableSnapshot: store.buildPortableSnapshot.bind(store),
+      renewExportLease: store.renewExportLease.bind(store),
+      validatePortableExportSource: store.validatePortableExportSource.bind(store),
+      readPortableExportChunks: store.readPortableExportChunks.bind(store),
       completeExport: store.completeExport.bind(store),
       failExport: store.failExport.bind(store),
       listRetainableExports: store.listRetainableExports.bind(store),
       markExportExpired: store.markExportExpired.bind(store),
       getOutboxEventStatus: async () => outboxStatus,
-      claimOutboxEvent: async (eventId: string, _dispatchToken: string) => {
+      claimOutboxEvent: async (eventId: string) => {
         if (outboxStatus !== 'pending') return { kind: 'stale' as const };
         outboxStatus = 'dispatching';
         return {
@@ -609,10 +588,10 @@ describe('outbox export acknowledgement', () => {
           payload: { exportId: 'exp-test' },
         };
       },
-      completeOutboxEvent: async (_eventId: string, _dispatchToken: string) => {
+      completeOutboxEvent: async () => {
         outboxStatus = 'published';
       },
-      releaseOutboxEvent: async (_eventId: string, _dispatchToken: string, _errorCode: string) => {
+      releaseOutboxEvent: async () => {
         outboxStatus = 'pending';
       },
     } as unknown as OutboxPersistencePort & ExportPersistencePort;
@@ -635,33 +614,3 @@ describe('outbox export acknowledgement', () => {
     expect(store.records.get('exp-test')?.status).toBe('succeeded');
   });
 });
-
-function emptySnapshot(): PortableRegistrySnapshot {
-  return {
-    schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
-    exportedAt: '2026-08-01T00:00:00.000Z',
-    actors: [],
-    providers: [],
-    profiles: [],
-    profileVersions: [],
-    policies: [],
-    policyVersions: [],
-    resources: [],
-    relationships: [],
-    relationshipHistory: [],
-    bindings: [],
-    bindingHistory: [],
-    health: [],
-    observations: [],
-    drifts: [],
-    operations: [],
-    operationResources: [],
-    operationSteps: [],
-    operationChanges: [],
-    locks: [],
-    lockGenerations: [],
-    events: [],
-    outbox: [],
-    exports: [],
-  };
-}

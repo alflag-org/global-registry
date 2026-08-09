@@ -412,6 +412,15 @@ export class D1GlobalRegistryRepository {
     await this.exports.complete(input);
   }
 
+  async renewExportLease(input: {
+    exportId: string;
+    revision: number;
+    objectKey: string;
+    claimToken: string;
+  }): Promise<void> {
+    await this.exports.renew(input);
+  }
+
   async failExport(input: {
     exportId: string;
     revision: number;
@@ -421,7 +430,11 @@ export class D1GlobalRegistryRepository {
     await this.exports.fail(input);
   }
 
-  async buildPortableSnapshot() {
-    return this.exports.buildPortableSnapshot();
+  async validatePortableExportSource(): Promise<void> {
+    await this.exports.validatePortableExportSource();
+  }
+
+  readPortableExportChunks(exportId: string) {
+    return this.exports.readPortableExportChunks(exportId);
   }
 }

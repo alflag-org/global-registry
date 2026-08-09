@@ -13,10 +13,7 @@ export const MAX_RAW_SQL_EXPORT_BYTES = 32 * 1024 * 1024;
 const rootDirectory = fileURLToPath(new URL('..', import.meta.url));
 await checkTypeScriptContainment(rootDirectory);
 const { validateRegistrySnapshot } = await import('../src/application/registry-validation');
-const { assertPortableExportRowCapacity, serializePortableSnapshot } =
-  await import('../src/application/registry-snapshot');
-const { MAX_PORTABLE_EXPORT_BYTES, PORTABLE_EXPORT_QUERY_LIMIT, PORTABLE_EXPORT_SCHEMA_VERSION } =
-  await import('../src/application/limits');
+const { PORTABLE_EXPORT_SCHEMA_VERSION } = await import('../src/application/limits');
 
 const rawExportTables = new Set([
   'd1_migrations',
@@ -172,28 +169,11 @@ try {
     });
     const snapshot = readSnapshot(database);
     const validation = validateRegistrySnapshot(snapshot);
-    let serialization: { bytes: number; sha256: string } | { error: string } | null = null;
-    if (validation.valid) {
-      try {
-        const body = serializePortableSnapshot(
-          snapshot as Parameters<typeof serializePortableSnapshot>[0],
-        );
-        serialization = {
-          bytes: Buffer.byteLength(body),
-          sha256: createHash('sha256').update(body).digest('hex'),
-        };
-      } catch (error) {
-        serialization = { error: error instanceof Error ? error.message : 'serialization_failed' };
-        process.exitCode = 1;
-      }
-    }
     console.log(
       JSON.stringify(
         {
           inventory,
           validation,
-          serialization,
-          portableExportMaxBytes: MAX_PORTABLE_EXPORT_BYTES,
         },
         null,
         2,
@@ -435,88 +415,65 @@ function sqlWithoutLiteralsAndComments(statement: string): string {
 }
 
 function readSnapshot(database: DatabaseSync): unknown {
-  const actorRows = boundedRows(database, 'SELECT * FROM actors ORDER BY id');
-  const providerRows = boundedRows(database, 'SELECT * FROM providers ORDER BY id');
-  const profileRows = boundedRows(database, 'SELECT * FROM profiles ORDER BY key');
-  const profileVersionRows = boundedRows(
+  const actorRows = snapshotRows(database, 'SELECT * FROM actors ORDER BY id');
+  const providerRows = snapshotRows(database, 'SELECT * FROM providers ORDER BY id');
+  const profileRows = snapshotRows(database, 'SELECT * FROM profiles ORDER BY key');
+  const profileVersionRows = snapshotRows(
     database,
     'SELECT * FROM profile_versions ORDER BY profile_key, version',
   );
-  const policyRows = boundedRows(database, 'SELECT * FROM policies ORDER BY namespace, key');
-  const policyVersionRows = boundedRows(
+  const policyRows = snapshotRows(database, 'SELECT * FROM policies ORDER BY namespace, key');
+  const policyVersionRows = snapshotRows(
     database,
     'SELECT * FROM policy_versions ORDER BY namespace, policy_key, version',
   );
-  const resourceRows = boundedRows(database, 'SELECT * FROM resources ORDER BY key');
-  const relationshipRows = boundedRows(
+  const resourceRows = snapshotRows(database, 'SELECT * FROM resources ORDER BY key');
+  const relationshipRows = snapshotRows(
     database,
     'SELECT * FROM resource_relationships ORDER BY id',
   );
-  const relationshipHistoryRows = boundedRows(
+  const relationshipHistoryRows = snapshotRows(
     database,
     'SELECT * FROM resource_relationship_history ORDER BY removed_at, id',
   );
-  const bindingRows = boundedRows(database, 'SELECT * FROM provider_bindings ORDER BY resource_id');
-  const bindingHistoryRows = boundedRows(
+  const bindingRows = snapshotRows(
+    database,
+    'SELECT * FROM provider_bindings ORDER BY resource_id',
+  );
+  const bindingHistoryRows = snapshotRows(
     database,
     'SELECT * FROM provider_binding_history ORDER BY unbound_at, id',
   );
-  const healthRows = boundedRows(database, 'SELECT * FROM health ORDER BY resource_id');
-  const observationRows = boundedRows(
+  const healthRows = snapshotRows(database, 'SELECT * FROM health ORDER BY resource_id');
+  const observationRows = snapshotRows(
     database,
     'SELECT * FROM observations ORDER BY created_at, id',
   );
-  const driftRows = boundedRows(database, 'SELECT * FROM drifts ORDER BY id');
-  const operationRows = boundedRows(database, 'SELECT * FROM operations ORDER BY created_at, id');
-  const operationResourceRows = boundedRows(
+  const driftRows = snapshotRows(database, 'SELECT * FROM drifts ORDER BY id');
+  const operationRows = snapshotRows(database, 'SELECT * FROM operations ORDER BY created_at, id');
+  const operationResourceRows = snapshotRows(
     database,
     `SELECT operation_resources.*, resources.key AS resource_key
        FROM operation_resources
        JOIN resources ON resources.id = operation_resources.resource_id
       ORDER BY operation_resources.operation_id, operation_resources.resource_id`,
   );
-  const operationStepRows = boundedRows(
+  const operationStepRows = snapshotRows(
     database,
     'SELECT * FROM operation_steps ORDER BY operation_id, position',
   );
-  const operationChangeRows = boundedRows(
+  const operationChangeRows = snapshotRows(
     database,
     'SELECT * FROM operation_changes ORDER BY operation_id, position',
   );
-  const lockRows = boundedRows(database, 'SELECT * FROM resource_locks ORDER BY scope');
-  const lockGenerationRows = boundedRows(
+  const lockRows = snapshotRows(database, 'SELECT * FROM resource_locks ORDER BY scope');
+  const lockGenerationRows = snapshotRows(
     database,
     'SELECT * FROM resource_lock_generations ORDER BY scope',
   );
-  const eventRows = boundedRows(database, 'SELECT * FROM events ORDER BY occurred_at, event_id');
-  const outboxRows = boundedRows(database, 'SELECT * FROM outbox ORDER BY created_at, id');
-  const exportRows = boundedRows(database, 'SELECT * FROM exports ORDER BY created_at, id');
-
-  assertPortableExportRowCapacity([
-    actorRows,
-    providerRows,
-    profileRows,
-    profileVersionRows,
-    policyRows,
-    policyVersionRows,
-    resourceRows,
-    relationshipRows,
-    relationshipHistoryRows,
-    bindingRows,
-    bindingHistoryRows,
-    healthRows,
-    observationRows,
-    driftRows,
-    operationRows,
-    operationResourceRows,
-    operationStepRows,
-    operationChangeRows,
-    lockRows,
-    lockGenerationRows,
-    eventRows,
-    outboxRows,
-    exportRows,
-  ]);
+  const eventRows = snapshotRows(database, 'SELECT * FROM events ORDER BY occurred_at, event_id');
+  const outboxRows = snapshotRows(database, 'SELECT * FROM outbox ORDER BY created_at, id');
+  const exportRows = snapshotRows(database, 'SELECT * FROM exports ORDER BY created_at, id');
 
   return {
     schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
@@ -879,8 +836,8 @@ function rows(database: DatabaseSync, sql: string): SqlRow[] {
   return database.prepare(sql).all() as SqlRow[];
 }
 
-function boundedRows(database: DatabaseSync, sql: string): SqlRow[] {
-  return rows(database, `${sql} LIMIT ${PORTABLE_EXPORT_QUERY_LIMIT}`);
+function snapshotRows(database: DatabaseSync, sql: string): SqlRow[] {
+  return rows(database, sql);
 }
 
 function scalar(database: DatabaseSync, sql: string): number {

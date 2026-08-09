@@ -18,7 +18,9 @@ Resource detail uses independent bounded cursors for relationships and drifts. C
 
 ## Exports and observation archives
 
-An export request is stored in D1, audited, and delivered through the outbox. Request an export with `POST /api/v1/exports`, then read its status with `GET /api/v1/exports/{id}`. Use the recorded R2 key and checksum only after D1 reports `succeeded`. The portable export is schema `1.1`, contains credential references only, and has the bounded validation and fenced completion described in [Architecture](architecture.md). A stale claim can clean up only its own token-specific object.
+An export request is stored in D1, audited, and delivered through the outbox. Request an export with `POST /api/v1/exports`, then read its status with `GET /api/v1/exports/{id}`. Use the recorded R2 key and checksum only after D1 reports `succeeded`. In schema `1.2`, the key identifies `manifest.json`; the manifest lists the ordered entity chunks, row counts, and SHA-256 checksums. Each chunk contains at most 1,000 rows, and every JSON object is at most 16 MiB. The former 1,000-row-per-entity, 10,000-row-total, and single-body 16 MiB limits no longer apply; capacity grows by adding chunks.
+
+Verify the D1 checksum against the exact serialized `manifest.json` bytes. Then verify the manifest's embedded checksum against its canonical fields excluding the checksum field and each listed chunk against its recorded checksum. The format contains credential references, never credential values. A stale claim can clean up only its revision- and token-specific prefix. Retention removes every object under the completed manifest prefix before clearing the D1 pointer.
 
 Scheduled maintenance requires an operator-owned Cron Trigger, an active-admin `BACKUP_ACTOR_ID`, D1, R2, and Queue bindings. Each invocation archives up to 100 expired observations to R2, removes up to 100 completed exports older than 365 days, creates at most one daily export request, and dispatches up to 100 outbox rows. Observation archival writes R2 before recording the D1 pointer. Export retention deletes R2 before clearing its D1 pointer. A later bounded invocation retries an incomplete sequence.
 
@@ -38,7 +40,7 @@ Validate a raw SQL export before giving it to the D1 operator recovery process:
 pnpm validate:sql-export /path/to/export.sql
 ```
 
-Validation rejects malformed, unsupported, or filesystem-capable SQL and checks the current schema and registry invariants in an in-memory database. The repository does not restore the database itself.
+Validation rejects malformed, unsupported, or filesystem-capable SQL and checks the current schema and registry invariants in an in-memory database. This raw SQL export is the full database recovery artifact. The chunked portable export is intended for schema-versioned inspection and interchange and is not a point-in-time database image. The repository does not restore either artifact itself.
 
 ## Queue, outbox, and locks
 
