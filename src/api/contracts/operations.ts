@@ -432,6 +432,7 @@ function operationStatusRoute(input: {
     | '/api/v1/operations/{id}/cancel';
   operationId: 'completeOperation' | 'failOperation' | 'cancelOperation';
   summary: string;
+  description?: string;
   targetStatus: 'succeeded' | 'failed' | 'cancelled';
 }) {
   return createRoute({
@@ -441,6 +442,7 @@ function operationStatusRoute(input: {
     tags: ['Operations'],
     summary: input.summary,
     description:
+      input.description ??
       'Changes the operation terminal status under an active lock and optimistic revision check. The operation role rule applies: provisioner or operator for non-destructive operations, operator for destructive operations.',
     ...operationRouteMetadata(),
     request: {
@@ -466,6 +468,8 @@ export const completeOperationRoute = operationStatusRoute({
   path: '/api/v1/operations/{id}/complete',
   operationId: 'completeOperation',
   summary: 'Complete an operation',
+  description:
+    'Verifies every planned resource lifecycle target, step terminal status, and Registry-visible change against authoritative D1 state before entering succeeded status. The active lock, fencing token, optimistic revision, and operation role rule also apply.',
   targetStatus: 'succeeded',
 });
 
