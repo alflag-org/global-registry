@@ -115,6 +115,7 @@ export interface Provider {
   credentialRef: string;
   status: 'active' | 'disabled' | 'retired';
   capabilities: JsonObject;
+  configuration: JsonObject;
   mappings: JsonObject;
   bindingRevision: number;
   revision: number;

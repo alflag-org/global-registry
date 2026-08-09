@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { RESOURCE_KINDS } from '../models/global-registry';
-import { PROVIDER_CAPABILITIES, PROVIDER_DRIVERS } from '../provider/model';
+import { providerCapabilitySchema, providerDriverSchema } from '../provider/schemas';
 import { hasUniqueValues } from '../unique-values';
 import {
   ADDRESS_FAMILIES,
@@ -213,7 +213,7 @@ export const resourceSpecOverrideSchemas = {
 const providerSelectorSchema = z
   .object({
     drivers: z
-      .array(z.enum(PROVIDER_DRIVERS))
+      .array(providerDriverSchema)
       .min(1)
       .refine(hasUniqueValues, 'Drivers must be unique.')
       .optional(),
@@ -223,7 +223,7 @@ const providerSelectorSchema = z
       .refine(hasUniqueValues, 'Provider IDs must be unique.')
       .optional(),
     requiredCapabilities: z
-      .array(z.enum(PROVIDER_CAPABILITIES))
+      .array(providerCapabilitySchema)
       .min(1)
       .refine(hasUniqueValues, 'Capabilities must be unique.')
       .optional(),

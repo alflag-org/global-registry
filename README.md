@@ -8,6 +8,8 @@ Global Registry is a provider-neutral desired-state registry for resources, prov
 - R2 stores completed exports and archived observations.
 - Queue delivery is at-least-once and is driven by the persisted D1 outbox.
 - Provider credentials are represented only by uppercase references such as `PROVIDER_CREDENTIAL`. A reference is not a secret.
+- A provider driver is a stable lowercase identifier such as `aws`, `openstack`, or `example.internal`. Adding one does not require a Global Registry release.
+- Provider configuration and mappings are bounded non-secret JSON. Global Registry preserves them for external adapters but does not interpret provider-specific fields or call provider APIs.
 - Production access requires Cloudflare Access and an active Actor mapping. Local authentication is development-only and loopback-only; it must not be exposed through a public bind or tunnel.
 
 The committed `wrangler.jsonc` contains unset deployment values, local simulation names, and disabled workers.dev and preview exposure. Use the operator overlay in [Deployment](docs/deployment.md) for a real environment.

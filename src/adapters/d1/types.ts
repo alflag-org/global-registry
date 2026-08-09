@@ -46,6 +46,7 @@ export interface ProviderRow {
   credential_ref: string;
   status: 'active' | 'disabled' | 'retired';
   capabilities_json: string;
+  configuration_json: string;
   mappings_json: string;
   binding_revision: number;
   revision: number;

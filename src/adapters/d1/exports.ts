@@ -255,6 +255,7 @@ export class D1Exports extends D1Client {
           leaseUntil,
           recovery,
           revision: nextRevision,
+          schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
           objectKey,
           claimToken,
         },
@@ -270,7 +271,7 @@ export class D1Exports extends D1Client {
     );
     const results = await this.db.batch([
       this.statement(
-        `UPDATE exports SET status = 'running', attempts = attempts + ?, lease_until = ?,
+        `UPDATE exports SET schema_version = ?, status = 'running', attempts = attempts + ?, lease_until = ?,
            error_message = NULL, completed_at = NULL, r2_object_key = NULL, r2_claim_token = NULL,
            claim_token = ?, claim_object_key = ?, revision = revision + 1, updated_at = ?
          WHERE id = ? AND revision = ? AND (
@@ -280,6 +281,7 @@ export class D1Exports extends D1Client {
            ))
            OR (attempts >= ? AND status = 'running' AND (lease_until IS NULL OR lease_until <= ?))
          )`,
+        PORTABLE_EXPORT_SCHEMA_VERSION,
         recovery ? 0 : 1,
         leaseUntil,
         claimToken,

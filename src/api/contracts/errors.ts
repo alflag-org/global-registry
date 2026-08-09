@@ -65,9 +65,9 @@ const examples = {
       message: 'The provider cannot satisfy this resource.',
       violations: [
         {
-          code: 'missing_network_mapping',
-          path: 'placement.zone',
-          message: 'The requested network mapping does not exist.',
+          code: 'missing_resource_capability',
+          path: 'provider.capabilities.features',
+          message: 'The selected provider does not declare a required capability.',
         },
       ],
     },

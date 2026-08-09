@@ -80,6 +80,7 @@ export function mapProvider(row: ProviderRow): Provider {
     credentialRef: row.credential_ref,
     status: row.status,
     capabilities: parseJsonObject(row.capabilities_json, 'provider capabilities'),
+    configuration: parseJsonObject(row.configuration_json, 'provider configuration'),
     mappings: parseJsonObject(row.mappings_json, 'provider mappings'),
     bindingRevision: row.binding_revision,
     revision: row.revision,

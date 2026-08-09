@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import {
   access,
   mkdir,
@@ -25,7 +26,7 @@ const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(new URL('..', import.meta.url).pathname);
 const runner = path.join(repositoryRoot, 'node_modules/.bin/tsx');
 const validator = path.join(repositoryRoot, 'scripts/validate-export.ts');
-const migration = await readFile(path.join(repositoryRoot, 'migrations/0001_initial.sql'), 'utf8');
+const representativeSchema = await buildRepresentativeSchemaExport();
 const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), 'global-registry-export-validation-'));
 const validPath = path.join(temporaryRoot, 'representative.sql');
 const outputParent = path.join(temporaryRoot, 'output-parent');
@@ -34,10 +35,7 @@ const exportScript = path.join(repositoryRoot, 'scripts/export.ts');
 
 try {
   await mkdir(outputParent);
-  await writeFile(
-    validPath,
-    `PRAGMA defer_foreign_keys=TRUE;\nCREATE TABLE IF NOT EXISTS "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);\nINSERT INTO "d1_migrations" ("id","name","applied_at") VALUES(1,'0001_initial.sql','2026-08-06 00:00:00');\n${migration}\n`,
-  );
+  await writeFile(validPath, representativeSchema);
   await expectAccepted(validPath);
 
   const sideEffectPath = path.join(temporaryRoot, 'unexpected-side-effect.sqlite');
@@ -124,6 +122,40 @@ try {
   );
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
+}
+
+async function buildRepresentativeSchemaExport() {
+  const migrationDirectory = path.join(repositoryRoot, 'migrations');
+  const migrationFiles = (await readdir(migrationDirectory))
+    .filter((filename) => filename.endsWith('.sql'))
+    .sort();
+  const database = new DatabaseSync(':memory:');
+  try {
+    database.exec('PRAGMA foreign_keys=ON;');
+    for (const filename of migrationFiles) {
+      database.exec(await readFile(path.join(migrationDirectory, filename), 'utf8'));
+    }
+    const schema = database
+      .prepare(
+        `SELECT sql
+           FROM sqlite_master
+          WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
+          ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 WHEN 'trigger' THEN 2 ELSE 3 END,
+                   name`,
+      )
+      .all()
+      .map((row) => `${row.sql};`)
+      .join('\n');
+    const ledger = migrationFiles
+      .map(
+        (filename, index) =>
+          `INSERT INTO "d1_migrations" ("id","name","applied_at") VALUES(${index + 1},'${filename.replaceAll("'", "''")}','2026-08-06 00:00:00');`,
+      )
+      .join('\n');
+    return `PRAGMA defer_foreign_keys=TRUE;\nCREATE TABLE IF NOT EXISTS "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);\n${ledger}\n${schema}\n`;
+  } finally {
+    database.close();
+  }
 }
 
 function outsideSideEffectPath(directory) {

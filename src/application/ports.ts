@@ -60,6 +60,7 @@ export interface CreateProviderInput {
   credentialRef: string;
   status: Provider['status'];
   capabilities: JsonObject;
+  configuration: JsonObject;
   mappings: JsonObject;
   actorId: string;
 }
@@ -74,6 +75,7 @@ export interface UpdateProviderInput {
   credentialRef?: string;
   status?: Provider['status'];
   capabilities?: JsonObject;
+  configuration?: JsonObject;
   mappings?: JsonObject;
   expectedBoundResources: Array<{ id: string; key: string; revision: number }>;
 }

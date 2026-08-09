@@ -24,6 +24,7 @@ interface ProviderStore {
     credentialRef: string;
     status: ProviderStatus;
     capabilities: JsonObject;
+    configuration: JsonObject;
     mappings: JsonObject;
     actorId: string;
   }): Promise<Provider>;
@@ -37,6 +38,7 @@ interface ProviderStore {
     credentialRef: string;
     status: ProviderStatus;
     capabilities: JsonObject;
+    configuration: JsonObject;
     mappings: JsonObject;
     expectedBoundResources: Array<{
       id: string;
@@ -62,6 +64,7 @@ interface CreateProviderCommand {
   credentialRef: string;
   status: ProviderStatus;
   capabilities: JsonObject;
+  configuration: JsonObject;
   mappings: JsonObject;
 }
 
@@ -73,6 +76,7 @@ interface UpdateProviderCommand {
   credentialRef?: string;
   status?: ProviderStatus;
   capabilities?: JsonObject;
+  configuration?: JsonObject;
   mappings?: JsonObject;
 }
 
@@ -86,6 +90,7 @@ export class ProviderService {
       credentialRef: input.credentialRef,
       status: input.status,
       capabilities: input.capabilities,
+      configuration: input.configuration,
       mappings: input.mappings,
     });
     return this.store.createProvider({ ...candidate, actorId: input.actorId });
@@ -106,6 +111,7 @@ export class ProviderService {
       input.credentialRef === undefined &&
       input.status === undefined &&
       input.capabilities === undefined &&
+      input.configuration === undefined &&
       input.mappings === undefined
     ) {
       throw new ValidationError(
@@ -125,6 +131,7 @@ export class ProviderService {
       credentialRef: input.credentialRef ?? current.credentialRef,
       status,
       capabilities: input.capabilities ?? current.capabilities,
+      configuration: input.configuration ?? current.configuration,
       mappings: input.mappings ?? current.mappings,
     });
     const candidate: Provider = {
@@ -159,7 +166,6 @@ export class ProviderService {
       const compatibility = evaluateProviderCompatibility({
         resource,
         provider: candidate,
-        binding,
         requireActive: false,
       });
       if (!compatibility.valid) {

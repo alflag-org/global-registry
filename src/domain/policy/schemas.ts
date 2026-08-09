@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PROVIDER_CAPABILITIES } from '../provider/model';
+import { providerCapabilitySchema } from '../provider/schemas';
 import { hasUniqueValues } from '../unique-values';
 import {
   ADDRESS_FAMILIES,
@@ -41,7 +41,7 @@ const integerBoundsSchema = z
 
 const commonFields = {
   allowedZones: uniqueArray(stableKeySchema).optional(),
-  requiredProviderCapabilities: uniqueArray(z.enum(PROVIDER_CAPABILITIES)).optional(),
+  requiredProviderCapabilities: uniqueArray(providerCapabilitySchema).optional(),
 };
 
 function nonEmptyConstraint<T extends z.ZodRawShape>(shape: T) {

@@ -22,6 +22,7 @@ export function registerProviderRoutes(app: OpenAPIHono<ApiEnvironment>): void {
       credentialRef: body.credentialRef,
       status: body.status,
       capabilities: ensureJsonObject(body.capabilities, 'capabilities'),
+      configuration: ensureJsonObject(body.configuration, 'configuration'),
       mappings: ensureJsonObject(body.mappings, 'mappings'),
       actorId: actor(c).id,
     });
@@ -53,6 +54,9 @@ export function registerProviderRoutes(app: OpenAPIHono<ApiEnvironment>): void {
       ...(body.capabilities === undefined
         ? {}
         : { capabilities: ensureJsonObject(body.capabilities, 'capabilities') }),
+      ...(body.configuration === undefined
+        ? {}
+        : { configuration: ensureJsonObject(body.configuration, 'configuration') }),
       ...(body.mappings === undefined
         ? {}
         : { mappings: ensureJsonObject(body.mappings, 'mappings') }),

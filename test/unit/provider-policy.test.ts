@@ -15,32 +15,15 @@ import { validateProviderDefinition } from '../../src/domain/provider/validation
 
 const capabilities = {
   resourceKinds: ['compute'],
-  features: ['compute.vm', 'cloud-init'],
+  features: ['compute.vm', 'compute.cloud-init'],
   architectures: ['amd64'],
 } satisfies JsonObject;
 
-const mappingsByDriver: Record<string, JsonObject> = {
-  proxmox: {
-    networks: { dmz: { bridge: 'vmbr0', vlanTag: 130 } },
-    storageClasses: { general: { storage: 'local-lvm' } },
-    imageClasses: { 'ubuntu-2404': { templateId: '9000' } },
-  },
-  cloudflare: {
-    networks: { dmz: { accountId: 'account', zoneId: 'zone' } },
-    storageClasses: { general: { bucketName: 'bucket' } },
-    imageClasses: { 'ubuntu-2404': { scriptName: 'worker' } },
-  },
-  aws: {
-    networks: { dmz: { vpcId: 'vpc-1', subnetIds: ['subnet-1'] } },
-    storageClasses: { general: { service: 'ebs', class: 'gp3' } },
-    imageClasses: { 'ubuntu-2404': { amiId: 'ami-1' } },
-  },
-  gcp: {
-    networks: { dmz: { project: 'project', network: 'default' } },
-    storageClasses: { general: { project: 'project', type: 'pd-balanced' } },
-    imageClasses: { 'ubuntu-2404': { project: 'ubuntu-os-cloud', image: 'ubuntu-2404' } },
-  },
-};
+const mappings = {
+  networks: { dmz: 'network-130' },
+  storageClasses: { general: 'volume-standard' },
+  imageClasses: { 'ubuntu-2404': 'image-2404' },
+} satisfies JsonObject;
 
 function computeResource(): Resource {
   return {
@@ -52,7 +35,7 @@ function computeResource(): Resource {
       locationKey: 'site-01',
       zone: 'dmz',
       providerSelector: {
-        drivers: ['proxmox'],
+        drivers: ['example.internal'],
         providerIds: ['provider-primary'],
         requiredCapabilities: ['compute.vm'],
       },
@@ -80,14 +63,15 @@ function computeResource(): Resource {
   };
 }
 
-function proxmoxProvider(): Provider {
+function internalProvider(): Provider {
   return {
     id: 'provider-primary',
-    driver: 'proxmox',
+    driver: 'example.internal',
     credentialRef: 'PROVIDER_CREDENTIAL',
     status: 'active',
     capabilities,
-    mappings: mappingsByDriver.proxmox ?? {},
+    configuration: { region: 'primary' },
+    mappings,
     bindingRevision: 0,
     revision: 1,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -108,28 +92,38 @@ function binding(): ProviderBinding {
 }
 
 describe('provider domain validation', () => {
-  it.each(['proxmox', 'cloudflare', 'aws', 'gcp'])('accepts strict %s mappings', (driver) => {
+  it('accepts extensible drivers, capabilities, configuration, and mappings', () => {
     expect(
       validateProviderDefinition({
-        id: `${driver}-provider`,
-        driver,
-        credentialRef: `${driver.toUpperCase()}_CREDENTIAL`,
+        id: 'internal-provider',
+        driver: 'example.internal',
+        credentialRef: 'INTERNAL_CREDENTIAL',
         status: 'active',
-        capabilities,
-        mappings: mappingsByDriver[driver],
-      }).driver,
-    ).toBe(driver);
+        capabilities: {
+          ...capabilities,
+          features: ['compute.vm', 'custom.example.foo'],
+          architectures: ['amd64', 'riscv64'],
+        },
+        configuration: { region: 'primary', adapterOption: true },
+        mappings: { arbitraryAdapterMapping: { logical: 'provider-side-id' } },
+      }),
+    ).toMatchObject({
+      driver: 'example.internal',
+      configuration: { region: 'primary', adapterOption: true },
+      mappings: { arbitraryAdapterMapping: { logical: 'provider-side-id' } },
+    });
   });
 
-  it('rejects arbitrary capabilities and driver mapping fields', () => {
+  it('rejects malformed identifiers and secret-like opaque configuration', () => {
     expect(() =>
       validateProviderDefinition({
         id: 'provider-primary',
-        driver: 'proxmox',
+        driver: 'Invalid Driver',
         credentialRef: 'PROVIDER_CREDENTIAL',
         status: 'active',
-        capabilities: { ...capabilities, arbitrary: true },
-        mappings: mappingsByDriver.proxmox,
+        capabilities,
+        configuration: {},
+        mappings,
       }),
     ).toThrowError(ValidationError);
     expect(() =>
@@ -139,50 +133,40 @@ describe('provider domain validation', () => {
         credentialRef: 'PROVIDER_CREDENTIAL',
         status: 'active',
         capabilities,
-        mappings: { ...mappingsByDriver.proxmox, arbitrary: true },
+        configuration: { apiToken: 'must-not-be-stored' },
+        mappings,
       }),
     ).toThrowError(ValidationError);
   });
 
-  it('accepts a compatible binding and reports missing mappings deterministically', () => {
+  it('treats mappings as adapter-owned data', () => {
     expect(
       evaluateProviderCompatibility({
         resource: computeResource(),
-        provider: proxmoxProvider(),
-        binding: binding(),
+        provider: internalProvider(),
       }),
     ).toEqual({ valid: true, violations: [] });
 
-    const provider = proxmoxProvider();
-    provider.mappings = {
-      networks: {},
-      storageClasses: {},
-      imageClasses: {},
-    };
-    const result = evaluateProviderCompatibility({
-      resource: computeResource(),
-      provider,
-      binding: binding(),
-    });
-    expect(result.valid).toBe(false);
-    expect(result.violations.map((violation) => violation.code)).toEqual([
-      'missing_network_mapping',
-      'missing_image_mapping',
-      'missing_storage_mapping',
-    ]);
+    const provider = internalProvider();
+    provider.mappings = { adapterSpecific: { anything: true } };
+    expect(
+      evaluateProviderCompatibility({
+        resource: computeResource(),
+        provider,
+      }),
+    ).toEqual({ valid: true, violations: [] });
   });
 
   it('derives required capabilities from the resource specification', () => {
-    const provider = proxmoxProvider();
+    const provider = internalProvider();
     provider.capabilities = {
       resourceKinds: ['compute'],
-      features: ['cloud-init'],
+      features: ['compute.cloud-init'],
       architectures: ['amd64'],
     };
     const result = evaluateProviderCompatibility({
       resource: computeResource(),
       provider,
-      binding: binding(),
     });
     expect(result.violations).toContainEqual({
       code: 'missing_resource_capability',
@@ -193,7 +177,7 @@ describe('provider domain validation', () => {
   });
 
   it('validates every binding page instead of stopping after the first 50 rows', async () => {
-    const current = proxmoxProvider();
+    const current = internalProvider();
     const bindings = Array.from({ length: 51 }, (_, index) => {
       const resource = computeResource();
       resource.id = `resource-${index + 1}`;
@@ -235,7 +219,7 @@ describe('provider domain validation', () => {
   });
 
   it('passes the full binding count and membership snapshot to the CAS update', async () => {
-    const current = proxmoxProvider();
+    const current = internalProvider();
     const bindings = Array.from({ length: 51 }, (_, index) => {
       const resource = computeResource();
       resource.id = `resource-${index + 1}`;
@@ -329,7 +313,7 @@ describe('deterministic policy evaluation', () => {
     const result = evaluatePolicy({
       resource,
       policy,
-      provider: proxmoxProvider(),
+      provider: internalProvider(),
       binding: binding(),
     });
     expect(result).toEqual({
@@ -349,9 +333,9 @@ describe('deterministic policy evaluation', () => {
       resource: computeResource(),
       policy: {
         ...policy,
-        spec: { requiredProviderCapabilities: ['snapshot'] },
+        spec: { requiredProviderCapabilities: ['storage.snapshot'] },
       },
-      provider: proxmoxProvider(),
+      provider: internalProvider(),
       binding: binding(),
     });
     expect(result).toEqual({
@@ -360,7 +344,7 @@ describe('deterministic policy evaluation', () => {
         {
           code: 'missing_policy_capability',
           path: 'provider.capabilities.features',
-          message: 'Provider provider-primary does not provide snapshot.',
+          message: 'Provider provider-primary does not provide storage.snapshot.',
         },
       ],
     });

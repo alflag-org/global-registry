@@ -58,6 +58,13 @@ try {
   for (const column of ['claim_token', 'claim_object_key', 'r2_claim_token']) {
     assert(exportColumns.includes(column), `Missing fenced export column ${column}.`);
   }
+  const providerColumns = rows(database, 'PRAGMA table_info(providers)').map((row) =>
+    String(row.name),
+  );
+  assert(
+    providerColumns.includes('configuration_json'),
+    'Missing provider configuration_json column.',
+  );
 
   const expectedTriggers = [
     'resource_lock_generations_no_delete',
@@ -212,6 +219,29 @@ try {
         .run(timestamp, timestamp),
     'CHECK constraint failed',
   );
+  database
+    .prepare(
+      `INSERT INTO providers (
+         id, driver, credential_ref, capabilities_json, configuration_json, mappings_json,
+         created_at, updated_at
+       ) VALUES ('provider-extensible', 'example.internal', 'EXAMPLE_CREDENTIAL', ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      JSON.stringify({
+        resourceKinds: ['compute'],
+        features: ['compute.vm', 'custom.example.foo'],
+        architectures: ['amd64'],
+      }),
+      JSON.stringify({ region: 'primary' }),
+      JSON.stringify({ machines: { primary: 'machine-1' } }),
+      timestamp,
+      timestamp,
+    );
+  assert(
+    database.prepare(`SELECT driver FROM providers WHERE id = 'provider-extensible'`).get()
+      ?.driver === 'example.internal',
+    'The current schema rejected an extensible provider driver.',
+  );
   expectFailure(
     () =>
       database
@@ -324,6 +354,77 @@ function verifyUpgradePath(
       'migration-upgrade-sentinel',
       timestamp,
     );
+    database
+      .prepare(
+        `INSERT INTO providers (
+           id, driver, credential_ref, capabilities_json, mappings_json, created_at, updated_at
+         ) VALUES ('migration-provider', 'aws', 'MIGRATION_CREDENTIAL', ?, '{}', ?, ?)`,
+      )
+      .run(
+        JSON.stringify({
+          resourceKinds: ['compute'],
+          features: ['compute.vm'],
+          architectures: ['amd64'],
+        }),
+        timestamp,
+        timestamp,
+      );
+    database
+      .prepare(
+        `INSERT INTO resources (
+           id, key, kind, name, placement_json, spec_overrides_json, effective_spec_json,
+           lifecycle_state, created_at, updated_at
+         ) VALUES (
+           'migration-resource', 'migration-resource', 'compute', 'Migration resource',
+           '{}', '{}', '{}', 'absent', ?, ?
+         )`,
+      )
+      .run(timestamp, timestamp);
+    database
+      .prepare(
+        `INSERT INTO provider_bindings (
+           resource_id, provider_id, provider_resource_type, provider_resource_id,
+           locator_json, bound_at, bound_by
+         ) VALUES (
+           'migration-resource', 'migration-provider', 'compute.instance', 'instance-1',
+           '{}', ?, 'migration-upgrade-sentinel'
+         )`,
+      )
+      .run(timestamp);
+    database
+      .prepare(
+        `INSERT INTO operations (
+           id, actor_id, kind, status, plan_json, plan_hash, destructive,
+           revision, created_at, updated_at
+         ) VALUES (
+           'migration-operation', 'migration-upgrade-sentinel', 'migration-check', 'planned',
+           '{}', ?, 0, 1, ?, ?
+         )`,
+      )
+      .run(`sha256:${'0'.repeat(64)}`, timestamp, timestamp);
+    database
+      .prepare(
+        `INSERT INTO operation_changes (
+           operation_id, position, action, resource_id, provider_id,
+           provider_resource_type, provider_resource_id
+         ) VALUES (
+           'migration-operation', 0, 'binding.replace', 'migration-resource',
+           'migration-provider', 'compute.instance', 'instance-1'
+         )`,
+      )
+      .run();
+    database
+      .prepare(
+        `INSERT INTO provider_binding_history (
+           id, resource_id, provider_id, provider_resource_type, provider_resource_id,
+           locator_json, bound_at, unbound_at, bound_by, unbound_by, operation_id
+         ) VALUES (
+           'migration-binding-history', 'migration-resource', 'migration-provider',
+           'compute.instance', 'instance-0', '{}', ?, ?,
+           'migration-upgrade-sentinel', 'migration-upgrade-sentinel', 'migration-operation'
+         )`,
+      )
+      .run(timestamp, timestamp);
 
     applyMigrations(database, migrations.slice(1));
     assertDatabaseIntegrity(database, 'existing database upgrade');
@@ -339,6 +440,34 @@ function verifyUpgradePath(
         sentinel.role === 'admin' &&
         sentinel.active === 1,
       'Existing data was not preserved across incremental migrations.',
+    );
+    const provider = database
+      .prepare(
+        `SELECT providers.driver, providers.configuration_json, provider_bindings.provider_resource_id
+           FROM providers
+           JOIN provider_bindings ON provider_bindings.provider_id = providers.id
+          WHERE providers.id = 'migration-provider'`,
+      )
+      .get();
+    assert(
+      provider?.driver === 'aws' &&
+        provider.configuration_json === '{}' &&
+        provider.provider_resource_id === 'instance-1',
+      'Provider data or foreign-key references were not preserved across the provider table rebuild.',
+    );
+    const dependentRows = database
+      .prepare(
+        `SELECT
+           (SELECT provider_id FROM operation_changes
+             WHERE operation_id = 'migration-operation' AND position = 0) AS change_provider_id,
+           (SELECT provider_id FROM provider_binding_history
+             WHERE id = 'migration-binding-history') AS history_provider_id`,
+      )
+      .get();
+    assert(
+      dependentRows?.change_provider_id === 'migration-provider' &&
+        dependentRows.history_provider_id === 'migration-provider',
+      'Provider operation changes or binding history were not preserved across the table rebuild.',
     );
   } finally {
     database.close();

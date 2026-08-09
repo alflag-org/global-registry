@@ -1,10 +1,17 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import type { Provider } from '../../domain/models/global-registry';
 import { providerRecordSchema } from '../../domain/models/schemas';
-import { providerDefinitionSchema, providerStatusSchema } from '../../domain/provider/schemas';
+import {
+  credentialReferenceSchema,
+  providerCapabilitiesSchema,
+  providerDefinitionSchema,
+  providerDriverSchema,
+  providerStatusSchema,
+} from '../../domain/provider/schemas';
 import {
   jsonRequest,
   jsonResponse,
+  jsonObjectSchema,
   keySchema,
   pageLimitSchema,
   parseResponse,
@@ -18,29 +25,19 @@ const listProvidersQuerySchema = z
   .strict()
   .openapi('ListProvidersQuery');
 
-function createProviderVariant<const Index extends 0 | 1 | 2 | 3>(index: Index) {
-  const schema = providerDefinitionSchema.options[index];
-  return schema.extend({ status: providerStatusSchema.default('active') }).strict();
-}
-
-function providerResponseVariant<const Index extends 0 | 1 | 2 | 3>(index: Index) {
-  const schema = providerRecordSchema.options[index];
-  return schema
-    .extend({
-      id: schema.shape.id.openapi({ readOnly: true }),
-      bindingRevision: schema.shape.bindingRevision.openapi({ readOnly: true }),
-      revision: schema.shape.revision.openapi({ readOnly: true }),
-      createdAt: schema.shape.createdAt.openapi({ readOnly: true }),
-      updatedAt: schema.shape.updatedAt.openapi({ readOnly: true }),
-    })
-    .strict();
-}
+const providerConfigurationSchema = jsonObjectSchema.describe(
+  'Bounded non-secret configuration interpreted by the external provider adapter.',
+);
+const providerMappingsSchema = jsonObjectSchema.describe(
+  'Bounded non-secret logical-to-provider mappings interpreted by the external adapter.',
+);
 
 function hasMutableProviderField(value: {
   driver?: unknown;
   credentialRef?: unknown;
   status?: unknown;
   capabilities?: unknown;
+  configuration?: unknown;
   mappings?: unknown;
 }): boolean {
   return (
@@ -48,55 +45,47 @@ function hasMutableProviderField(value: {
     value.credentialRef !== undefined ||
     value.status !== undefined ||
     value.capabilities !== undefined ||
+    value.configuration !== undefined ||
     value.mappings !== undefined
   );
 }
 
 const createProviderRequestSchema = z
-  .discriminatedUnion('driver', [
-    createProviderVariant(0),
-    createProviderVariant(1),
-    createProviderVariant(2),
-    createProviderVariant(3),
-  ])
+  .object({
+    ...providerDefinitionSchema.shape,
+    status: providerStatusSchema.default('active'),
+    configuration: providerConfigurationSchema.default({}),
+    mappings: providerMappingsSchema.default({}),
+  })
+  .strict()
   .openapi('CreateProviderRequest');
 
 const updateProviderRequestSchema = z
-  .union([
-    providerDefinitionSchema.options[0]
-      .omit({ id: true })
-      .partial()
-      .extend({ expectedRevision: revisionSchema })
-      .strict()
-      .refine(hasMutableProviderField, 'At least one mutable provider field is required.'),
-    providerDefinitionSchema.options[1]
-      .omit({ id: true })
-      .partial()
-      .extend({ expectedRevision: revisionSchema })
-      .strict()
-      .refine(hasMutableProviderField, 'At least one mutable provider field is required.'),
-    providerDefinitionSchema.options[2]
-      .omit({ id: true })
-      .partial()
-      .extend({ expectedRevision: revisionSchema })
-      .strict()
-      .refine(hasMutableProviderField, 'At least one mutable provider field is required.'),
-    providerDefinitionSchema.options[3]
-      .omit({ id: true })
-      .partial()
-      .extend({ expectedRevision: revisionSchema })
-      .strict()
-      .refine(hasMutableProviderField, 'At least one mutable provider field is required.'),
-  ])
+  .object({
+    driver: providerDriverSchema.optional(),
+    credentialRef: credentialReferenceSchema.optional(),
+    status: providerStatusSchema.optional(),
+    capabilities: providerCapabilitiesSchema.optional(),
+    configuration: providerConfigurationSchema.optional(),
+    mappings: providerMappingsSchema.optional(),
+    expectedRevision: revisionSchema,
+  })
+  .strict()
+  .refine(hasMutableProviderField, 'At least one mutable provider field is required.')
   .openapi('UpdateProviderRequest');
 
 const providerResponseSchema = z
-  .discriminatedUnion('driver', [
-    providerResponseVariant(0),
-    providerResponseVariant(1),
-    providerResponseVariant(2),
-    providerResponseVariant(3),
-  ])
+  .object({
+    ...providerRecordSchema.shape,
+    id: providerRecordSchema.shape.id.openapi({ readOnly: true }),
+    configuration: providerConfigurationSchema,
+    mappings: providerMappingsSchema,
+    bindingRevision: providerRecordSchema.shape.bindingRevision.openapi({ readOnly: true }),
+    revision: providerRecordSchema.shape.revision.openapi({ readOnly: true }),
+    createdAt: providerRecordSchema.shape.createdAt.openapi({ readOnly: true }),
+    updatedAt: providerRecordSchema.shape.updatedAt.openapi({ readOnly: true }),
+  })
+  .strict()
   .openapi('Provider');
 
 const providerListResponseSchema = z
@@ -115,18 +104,19 @@ const providerIdParamsSchema = z
 
 const providerExample = {
   id: 'provider-primary',
-  driver: 'proxmox',
+  driver: 'example.internal',
   credentialRef: 'PROVIDER_CREDENTIAL',
   status: 'active',
   capabilities: {
     resourceKinds: ['compute'],
-    features: ['compute.vm'],
+    features: ['compute.vm', 'custom.example.snapshot'],
     architectures: ['amd64'],
   },
+  configuration: { region: 'primary' },
   mappings: {
-    networks: { dmz: { bridge: 'vmbr0', vlanTag: 130 } },
-    storageClasses: { general: { storage: 'local-lvm' } },
-    imageClasses: { 'ubuntu-2404': { templateId: '9000' } },
+    networks: { dmz: 'network-130' },
+    storageClasses: { general: 'volume-standard' },
+    imageClasses: { 'ubuntu-2404': 'image-2404' },
   },
   bindingRevision: 0,
   revision: 1,
@@ -141,18 +131,19 @@ export const createProviderRoute = createRoute({
   tags: ['Providers'],
   summary: 'Create a provider',
   description:
-    'Creates a provider using driver-specific capabilities and mappings. Requires the admin role.',
+    'Creates a provider. Global Registry validates provider-neutral fields and preserves configuration and mappings as non-secret JSON for an external adapter. Requires the admin role.',
   ...protectedRouteMetadata('admin'),
   request: {
     body: jsonRequest(
       createProviderRequestSchema,
-      'The immutable provider ID, driver, credential reference, capabilities, and mappings.',
+      'The immutable provider ID, stable driver identifier, credential reference, capabilities, configuration, and mappings.',
       {
         id: providerExample.id,
         driver: providerExample.driver,
         credentialRef: providerExample.credentialRef,
         status: providerExample.status,
         capabilities: providerExample.capabilities,
+        configuration: providerExample.configuration,
         mappings: providerExample.mappings,
       },
     ),
@@ -204,7 +195,7 @@ export const updateProviderRoute = createRoute({
   tags: ['Providers'],
   summary: 'Update a provider',
   description:
-    'Updates provider configuration with optimistic locking and revalidates every active binding and policy. Requires the admin role.',
+    'Updates a provider with optimistic locking and revalidates every active binding and policy against provider-neutral capabilities. Requires the admin role.',
   ...protectedRouteMetadata('admin'),
   request: {
     params: providerIdParamsSchema,

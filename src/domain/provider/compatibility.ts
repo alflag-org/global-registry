@@ -1,52 +1,12 @@
 import type { DomainViolation } from '../errors/violations';
-import type { Provider, ProviderBinding, Resource, ResourceKind } from '../models/global-registry';
-import type {
-  ProviderCapabilities,
-  ProviderCapability,
-  ProviderDriver,
-  ProviderStatus,
-} from './model';
-import { providerCapabilitiesSchema, providerMappingSchemas } from './schemas';
+import type { Provider, Resource, ResourceKind } from '../models/global-registry';
+import type { ProviderCapabilities, ProviderCapability, ProviderStatus } from './model';
+import { providerCapabilitiesSchema, providerDriverSchema } from './schemas';
 import { placementSchema, resourceSpecSchemas } from '../resource/schemas';
-
-type ProviderResourceTypeMatrix = Record<ProviderDriver, Partial<Record<ResourceKind, string[]>>>;
-
-const PROVIDER_RESOURCE_TYPES: ProviderResourceTypeMatrix = {
-  proxmox: {
-    network: ['network'],
-    compute: ['qemu', 'lxc'],
-    volume: ['volume'],
-  },
-  cloudflare: {
-    network: ['dns_zone'],
-    service_instance: ['worker'],
-    endpoint: ['dns_record'],
-    backup_repository: ['r2_bucket'],
-  },
-  aws: {
-    network: ['vpc'],
-    compute: ['ec2_instance'],
-    volume: ['ebs_volume', 'efs_file_system'],
-    service_cluster: ['ecs_cluster', 'eks_cluster'],
-    service_instance: ['ecs_service', 'lambda_function'],
-    endpoint: ['elb', 'route53_record'],
-    backup_repository: ['s3_bucket'],
-  },
-  gcp: {
-    network: ['network'],
-    compute: ['compute_instance'],
-    volume: ['persistent_disk'],
-    service_cluster: ['gke_cluster'],
-    service_instance: ['cloud_run_service', 'cloud_function'],
-    endpoint: ['forwarding_rule', 'dns_record'],
-    backup_repository: ['storage_bucket'],
-  },
-};
 
 interface CompatibilityInput {
   resource: Resource;
   provider: Provider;
-  binding: Pick<ProviderBinding, 'providerResourceType'>;
   requireActive?: boolean;
 }
 
@@ -91,10 +51,7 @@ export function evaluateProviderCompatibility(input: CompatibilityInput): Compat
     'architecture' in resourceSpec && typeof resourceSpec.architecture === 'string'
       ? resourceSpec.architecture
       : undefined;
-  if (
-    architecture !== undefined &&
-    !provider.capabilities.architectures.includes(architecture as 'amd64' | 'arm64')
-  ) {
+  if (architecture !== undefined && !provider.capabilities.architectures.includes(architecture)) {
     violations.push({
       code: 'unsupported_architecture',
       path: 'spec.architecture',
@@ -118,54 +75,13 @@ export function evaluateProviderCompatibility(input: CompatibilityInput): Compat
     });
   }
   for (const capability of selector?.requiredCapabilities ?? []) {
-    if (!provider.capabilities.features.includes(capability as never)) {
+    if (!provider.capabilities.features.includes(capability)) {
       violations.push({
         code: 'missing_required_capability',
         path: 'placement.providerSelector.requiredCapabilities',
         message: `Provider ${provider.id} does not provide ${capability}.`,
       });
     }
-  }
-
-  if (placement.zone !== undefined && provider.mappings.networks[placement.zone] === undefined) {
-    violations.push({
-      code: 'missing_network_mapping',
-      path: 'placement.zone',
-      message: `Provider ${provider.id} does not define network mapping ${placement.zone}.`,
-    });
-  }
-
-  const imageClass =
-    'imageClass' in resourceSpec && typeof resourceSpec.imageClass === 'string'
-      ? resourceSpec.imageClass
-      : undefined;
-  if (imageClass !== undefined && provider.mappings.imageClasses[imageClass] === undefined) {
-    violations.push({
-      code: 'missing_image_mapping',
-      path: 'spec.imageClass',
-      message: `Provider ${provider.id} does not define image mapping ${imageClass}.`,
-    });
-  }
-
-  const storageClass =
-    'storageClass' in resourceSpec && typeof resourceSpec.storageClass === 'string'
-      ? resourceSpec.storageClass
-      : undefined;
-  if (storageClass !== undefined && provider.mappings.storageClasses[storageClass] === undefined) {
-    violations.push({
-      code: 'missing_storage_mapping',
-      path: 'spec.storageClass',
-      message: `Provider ${provider.id} does not define storage mapping ${storageClass}.`,
-    });
-  }
-
-  const allowedTypes = PROVIDER_RESOURCE_TYPES[provider.driver][input.resource.kind] ?? [];
-  if (!allowedTypes.includes(input.binding.providerResourceType)) {
-    violations.push({
-      code: 'unsupported_provider_resource_type',
-      path: 'providerResourceType',
-      message: `${input.binding.providerResourceType} is not valid for ${provider.driver} ${input.resource.kind}.`,
-    });
   }
 
   return { valid: violations.length === 0, violations };
@@ -206,23 +122,14 @@ function requiredCapabilities(
 
 function parseProvider(provider: Provider): {
   id: string;
-  driver: ProviderDriver;
+  driver: string;
   status: ProviderStatus;
   capabilities: ProviderCapabilities;
-  mappings: {
-    networks: Record<string, unknown>;
-    storageClasses: Record<string, unknown>;
-    imageClasses: Record<string, unknown>;
-  };
 } {
-  const driver = provider.driver as ProviderDriver;
-  const capabilities = providerCapabilitiesSchema.parse(provider.capabilities);
-  const mappings = providerMappingSchemas[driver].parse(provider.mappings);
   return {
     id: provider.id,
-    driver,
+    driver: providerDriverSchema.parse(provider.driver),
     status: provider.status,
-    capabilities,
-    mappings,
+    capabilities: providerCapabilitiesSchema.parse(provider.capabilities),
   };
 }

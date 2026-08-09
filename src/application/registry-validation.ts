@@ -139,6 +139,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
   for (const provider of snapshot.providers) {
     capture(violations, 'provider', provider.id, provider, () => {
       ensureJsonObject(provider.capabilities, `provider ${provider.id} capabilities`);
+      ensureJsonObject(provider.configuration, `provider ${provider.id} configuration`);
       ensureJsonObject(provider.mappings, `provider ${provider.id} mappings`);
       validateProviderDefinition({
         id: provider.id,
@@ -146,6 +147,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
         credentialRef: provider.credentialRef,
         status: provider.status,
         capabilities: provider.capabilities,
+        configuration: provider.configuration,
         mappings: provider.mappings,
       });
     });
@@ -331,7 +333,6 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
         evaluateProviderCompatibility({
           resource,
           provider,
-          binding,
           requireActive: false,
         }).violations,
       );

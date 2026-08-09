@@ -20,7 +20,7 @@ Resource detail uses independent bounded cursors for relationships and drifts. C
 
 ## Exports and observation archives
 
-An export request is stored in D1, audited, and delivered through the outbox. Request an export with `POST /api/v1/exports`, then read its status with `GET /api/v1/exports/{id}`. Use the recorded R2 key and checksum only after D1 reports `succeeded`. The portable export is schema `1.1`, contains credential references only, and has the bounded validation and fenced completion described in [Architecture](architecture.md). A stale claim can clean up only its own token-specific object.
+An export request is stored in D1, audited, and delivered through the outbox. Request an export with `POST /api/v1/exports`, then read its status with `GET /api/v1/exports/{id}`. Use the recorded R2 key and checksum only after D1 reports `succeeded`. The portable export is schema `1.2`, contains credential references and bounded non-secret provider data, and has the validation and fenced completion described in [Architecture](architecture.md). A stale claim can clean up only its own token-specific object.
 
 Scheduled maintenance requires an operator-owned Cron Trigger, an active-admin `BACKUP_ACTOR_ID`, D1, R2, and Queue bindings. Each invocation archives up to 100 expired observations to R2, removes up to 100 completed exports older than 365 days, creates at most one daily export request, and dispatches up to 100 outbox rows. Observation archival writes R2 before recording the D1 pointer. Export retention deletes R2 before clearing its D1 pointer. A later bounded invocation retries an incomplete sequence.
 

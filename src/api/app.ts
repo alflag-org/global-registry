@@ -49,7 +49,10 @@ const openApiConfiguration = {
     { name: 'Authentication', description: 'Authenticated Access session information.' },
     { name: 'Actors', description: 'Global Registry authorization mappings.' },
     { name: 'Resources', description: 'Provider-neutral infrastructure resources.' },
-    { name: 'Providers', description: 'Provider capabilities and mappings.' },
+    {
+      name: 'Providers',
+      description: 'Extensible provider drivers, capabilities, configuration, and mappings.',
+    },
     { name: 'Profiles', description: 'Versioned resource specification profiles.' },
     { name: 'Policies', description: 'Versioned deterministic policy definitions.' },
     { name: 'Bindings', description: 'Resource to provider bindings.' },
