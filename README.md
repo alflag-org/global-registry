@@ -31,7 +31,16 @@ mise run migrate-local
 mise run dev
 ```
 
-After applying the pending migrations, create the first active admin through the local D1 SQL console with an `access:<subject>` or `service:<common_name>` identity, using the same Actor ID in `created_by` and `updated_by`. The repository has no seed or import command.
+After applying the pending migrations, create the first active admin without an Access JWT:
+
+```sh
+mise run bootstrap-admin -- \
+  --database DB \
+  --identity access:<subject> \
+  --display-name "Registry Administrator"
+```
+
+The command defaults to local D1, refuses to run if an admin Actor already exists, and relies on the schema to create the matching audit event and outbox row atomically. Use `service:<common_name>` for a service Actor. The repository has no seed or import command.
 
 ## Verification
 

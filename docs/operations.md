@@ -2,9 +2,20 @@
 
 ## Access and Actor administration
 
-Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Create it through the D1 operator console after the pending migrations have been applied. Use `access:<sub>` for a human identity or `service:<common_name>` for a service identity.
+Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Apply all pending migrations, then run the operator-only CLI against the configured remote D1 database:
 
-Actor identity and creation metadata are immutable. Role and active-state changes require the expected revision, are audited, and cannot remove the final active admin or lock out the updating admin. Use the API or UI for normal Actor changes; the first-admin insert is the bootstrap exception. Local authentication procedures and their loopback boundary are in [SECURITY.md](../SECURITY.md).
+```sh
+mise run bootstrap-admin -- \
+  --remote \
+  --database DB \
+  --config wrangler.operator.jsonc \
+  --identity access:<sub> \
+  --display-name "Registry Administrator"
+```
+
+Use `service:<common_name>` for a service identity. The CLI requires no Access JWT or provider credential. It refuses to run if an admin Actor already exists, sets `role=admin` and `active=true`, uses the new Actor as its own creator and updater, and verifies the audit event and outbox row created by the existing D1 trigger.
+
+Actor identity and creation metadata are immutable. Role and active-state changes require the expected revision, are audited, and cannot remove the final active admin or lock out the updating admin. Use the API or UI for normal Actor changes; the first-admin CLI is the bootstrap exception. Local authentication procedures and their loopback boundary are in [SECURITY.md](../SECURITY.md).
 
 ## Migration and recovery
 
