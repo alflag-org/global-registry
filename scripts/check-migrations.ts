@@ -1,32 +1,25 @@
-import { readFile } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { checkTypeScriptContainment } from './check-typescript-containment.mjs';
+import {
+  applyMigrations,
+  assertDatabaseIntegrity,
+  INITIAL_MIGRATION_FILE,
+  loadMigrations,
+  type Migration,
+} from './migration-validation';
 
 await checkTypeScriptContainment();
 
-const migrationFiles = (await import('node:fs/promises')).readdir(
-  new URL('../migrations/', import.meta.url),
-);
-const files = (await migrationFiles).filter((file) => file.endsWith('.sql')).sort();
-if (JSON.stringify(files) !== JSON.stringify(['0001_initial.sql'])) {
-  throw new Error(`Expected exactly migrations/0001_initial.sql, found: ${files.join(', ')}`);
-}
-
-const migration = await readFile(
-  new URL('../migrations/0001_initial.sql', import.meta.url),
-  'utf8',
-);
+const migrations = await loadMigrations(new URL('../migrations/', import.meta.url));
+const initialMigration = migrations[0];
+assert(initialMigration !== undefined, `Missing ${INITIAL_MIGRATION_FILE}.`);
 const database = new DatabaseSync(':memory:');
+database.exec('PRAGMA foreign_keys = ON');
+let latestSchemaSignature: string | undefined;
+let triggerCount: number;
 try {
-  database.exec(migration);
-  assert(
-    database.prepare('PRAGMA quick_check').get()?.quick_check === 'ok',
-    'PRAGMA quick_check failed',
-  );
-  assert(
-    database.prepare('PRAGMA foreign_key_check').all().length === 0,
-    'PRAGMA foreign_key_check failed',
-  );
+  applyMigrations(database, migrations);
+  assertDatabaseIntegrity(database, 'fresh database');
 
   const expectedTables = [
     'actors',
@@ -87,11 +80,12 @@ try {
     database,
     `SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name`,
   ).map((row) => String(row.name));
+  triggerCount = actualTriggers.length;
   assert(actualTables.length === 23, `Expected 23 tables, found ${actualTables.length}.`);
   assert(actualTriggers.length === 40, `Expected 40 triggers, found ${actualTriggers.length}.`);
   assert(
-    countMigrationCommands(migration) === 83,
-    `Expected 83 migration commands, found ${countMigrationCommands(migration)}.`,
+    countMigrationCommands(initialMigration.sql) === 83,
+    `Expected 83 commands in frozen ${INITIAL_MIGRATION_FILE}, found ${countMigrationCommands(initialMigration.sql)}.`,
   );
   for (const trigger of expectedTriggers)
     assert(actualTriggers.includes(trigger), `Missing trigger ${trigger}.`);
@@ -265,22 +259,30 @@ try {
         WHERE id = 'export-running'`,
     )
     .run(timestamp, timestamp);
-  console.log(
-    JSON.stringify(
-      {
-        migration: '0001_initial.sql',
-        tables: actualTables,
-        triggers: actualTriggers.length,
-        quickCheck: 'ok',
-        foreignKeyCheck: 'ok',
-      },
-      null,
-      2,
-    ),
-  );
+  latestSchemaSignature = schemaSignature(database);
 } finally {
   database.close();
 }
+
+assert(latestSchemaSignature !== undefined, 'Fresh database schema signature was not captured.');
+verifyUpgradePath(migrations, latestSchemaSignature);
+
+console.log(
+  JSON.stringify(
+    {
+      migrations: migrations.map((migration) => migration.filename),
+      frozenInitialSha256: initialMigration.sha256,
+      upgradeMigrations: migrations.length - 1,
+      tables: 23,
+      triggers: triggerCount,
+      freshDatabase: 'ok',
+      existingDatabaseUpgrade: 'ok',
+      foreignKeyCheck: 'ok',
+    },
+    null,
+    2,
+  ),
+);
 
 function insertActor(
   database: DatabaseSync,
@@ -300,6 +302,59 @@ function insertActor(
 
 function rows(database: DatabaseSync, sql: string): Array<Record<string, unknown>> {
   return database.prepare(sql).all() as Array<Record<string, unknown>>;
+}
+
+function verifyUpgradePath(
+  migrations: readonly Migration[],
+  expectedSchemaSignature: string,
+): void {
+  const database = new DatabaseSync(':memory:');
+  database.exec('PRAGMA foreign_keys = ON');
+  try {
+    const initial = migrations[0];
+    assert(initial !== undefined, `Missing ${INITIAL_MIGRATION_FILE}.`);
+    applyMigrations(database, [initial]);
+
+    const timestamp = '2026-08-05T00:00:00.000Z';
+    insertActor(
+      database,
+      'migration-upgrade-sentinel',
+      'access:migration-upgrade-sentinel',
+      'admin',
+      'migration-upgrade-sentinel',
+      timestamp,
+    );
+
+    applyMigrations(database, migrations.slice(1));
+    assertDatabaseIntegrity(database, 'existing database upgrade');
+    assert(
+      schemaSignature(database) === expectedSchemaSignature,
+      'Existing database upgrade did not produce the same schema as a fresh database.',
+    );
+    const sentinel = database
+      .prepare('SELECT identity, role, active FROM actors WHERE id = ?')
+      .get('migration-upgrade-sentinel');
+    assert(
+      sentinel?.identity === 'access:migration-upgrade-sentinel' &&
+        sentinel.role === 'admin' &&
+        sentinel.active === 1,
+      'Existing data was not preserved across incremental migrations.',
+    );
+  } finally {
+    database.close();
+  }
+}
+
+function schemaSignature(database: DatabaseSync): string {
+  return JSON.stringify(
+    rows(
+      database,
+      `SELECT type, name, tbl_name, sql
+         FROM sqlite_master
+        WHERE name NOT LIKE 'sqlite_%'
+        ORDER BY type, name`,
+    ),
+  );
 }
 
 function assert(condition: boolean, message: string): asserts condition {

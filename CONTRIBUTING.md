@@ -23,7 +23,7 @@ The implementation uses one path: `route -> application -> domain -> port -> ada
 - `src/application/` owns use cases and application-facing ports.
 - `src/domain/` owns models, validation, lifecycle, policy, and provider-neutral rules.
 - `src/adapters/` owns Access, D1, R2, and Queue integrations.
-- `migrations/0001_initial.sql` is the single schema migration.
+- `migrations/` contains forward-only D1 migrations in sequence order.
 
 Route schemas are the source for the runtime-generated OpenAPI document. Do not add a separate hand-maintained API specification. When changing routes, schemas, authorization, lifecycle transitions, exports, or operator procedures, update the implementation, focused tests, and the relevant public document.
 
@@ -47,8 +47,10 @@ pnpm check:local-auth
 
 Run `pnpm browser:install` before the local-auth check when the locked browser is not installed. The deployment dry run uses the inert shared configuration and does not publish a Worker.
 
-## Single migration
+## Forward-only migrations
 
-The public schema is defined by `migrations/0001_initial.sql`, and `pnpm check:migrations` requires exactly that migration file. Keep schema changes in this single migration and preserve its D1-enforced invariants. Do not add a second migration, compatibility path, or schema ledger.
+`migrations/0001_initial.sql` is frozen. Do not edit it. Add schema changes as consecutively numbered files such as `0002_add_example.sql`; Wrangler and D1 own the migration ledger.
+
+Keep migrations forward-only. Prefer an additive migration, deploy code that can use both schema shapes, migrate data in bounded work, and remove the old shape in a later migration. Do not ship a migration that immediately breaks the currently deployed Worker. `pnpm check:migrations` verifies the frozen initial hash, filename sequence, fresh installation, existing-database upgrade, integrity checks, and data preservation.
 
 Report security issues privately as described in [SECURITY.md](SECURITY.md).

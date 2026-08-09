@@ -53,4 +53,4 @@ An export request is persisted in D1 and processed through the outbox. The porta
 
 Scheduled maintenance requires an operator-owned Cron Trigger, an active admin Actor in `BACKUP_ACTOR_ID`, and the asynchronous bindings. It archives expired observations, prunes retained exports, creates the daily export request, and dispatches pending outbox rows in bounded work units.
 
-The schema is defined by the single [`migrations/0001_initial.sql`](../migrations/0001_initial.sql) migration. D1 constraints and triggers enforce identity, active-admin, lifecycle, JSON, revision, append-only, fencing-generation, foreign-key, and relationship invariants.
+The schema is built from the forward-only SQL files in [`migrations/`](../migrations). `0001_initial.sql` is frozen; later files use contiguous sequence numbers and are recorded by the Wrangler/D1 migration ledger. The repository does not maintain a second ledger. D1 constraints and triggers enforce identity, active-admin, lifecycle, JSON, revision, append-only, fencing-generation, foreign-key, and relationship invariants.
