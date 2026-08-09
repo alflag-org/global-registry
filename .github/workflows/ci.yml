@@ -26,7 +26,7 @@ jobs:
         uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
         with:
           version: 2026.8.1
-          sha256: 961b1dbf70c6c0edb8ad8a7e6dd8f96e2fe9175a0c2a1d50d4d1f4e84c73a5f0
+          sha256: 961b1fcc78830e861ab887abd19d9b961478bcf252e37881fdd61c81388308d4
           install: false
           cache: true
 
