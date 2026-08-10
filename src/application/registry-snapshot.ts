@@ -22,9 +22,8 @@ import {
 } from '../domain/models/schemas';
 import { RELATIONSHIP_TYPES, VERSION_PARENT_STATUSES } from '../domain/models/global-registry';
 import {
-  MAX_PORTABLE_EXPORT_BYTES,
-  MAX_PORTABLE_EXPORT_ROWS_PER_TABLE,
-  MAX_PORTABLE_EXPORT_TOTAL_ROWS,
+  MAX_PORTABLE_EXPORT_OBJECT_BYTES,
+  MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK,
   PORTABLE_EXPORT_SCHEMA_VERSION,
 } from './limits';
 
@@ -217,7 +216,6 @@ export const portableOutboxSchema = z
 
 export const portableExportSchema = exportRecordSchema
   .extend({
-    schemaVersion: z.literal(PORTABLE_EXPORT_SCHEMA_VERSION),
     attempts: nonnegativeIntegerSchema,
     leaseUntil: timestampSchema.optional(),
     updatedAt: timestampSchema,
@@ -256,24 +254,169 @@ export const registrySnapshotSchema = z
 
 export type PortableRegistrySnapshot = z.output<typeof registrySnapshotSchema>;
 
-export function assertPortableExportRowCapacity(
-  rowSets: ReadonlyArray<ReadonlyArray<unknown>>,
-): void {
-  const totalRows = rowSets.reduce((total, rows) => total + rows.length, 0);
-  if (
-    rowSets.some((rows) => rows.length > MAX_PORTABLE_EXPORT_ROWS_PER_TABLE) ||
-    totalRows > MAX_PORTABLE_EXPORT_TOTAL_ROWS
-  ) {
-    throw new Error('portable_export_capacity_exceeded');
-  }
+export const PORTABLE_EXPORT_ENTITIES = [
+  'actors',
+  'providers',
+  'profiles',
+  'profileVersions',
+  'policies',
+  'policyVersions',
+  'resources',
+  'relationships',
+  'relationshipHistory',
+  'bindings',
+  'bindingHistory',
+  'health',
+  'observations',
+  'drifts',
+  'operations',
+  'operationResources',
+  'operationSteps',
+  'operationChanges',
+  'locks',
+  'lockGenerations',
+  'events',
+  'outbox',
+  'exports',
+] as const;
+
+export type PortableExportEntity = (typeof PORTABLE_EXPORT_ENTITIES)[number];
+
+const portableEntitySchema: Record<PortableExportEntity, z.ZodType> = {
+  actors: portableActorSchema,
+  providers: providerRecordSchema,
+  profiles: portableProfileSchema,
+  profileVersions: portableProfileVersionSchema,
+  policies: portablePolicySchema,
+  policyVersions: portablePolicyVersionSchema,
+  resources: resourceRecordSchema,
+  relationships: resourceRelationshipRecordSchema,
+  relationshipHistory: portableRelationshipHistorySchema,
+  bindings: portableBindingSchema,
+  bindingHistory: portableBindingHistorySchema,
+  health: portableHealthSchema,
+  observations: portableObservationSchema,
+  drifts: portableDriftSchema,
+  operations: operationRecordSchema,
+  operationResources: portableOperationResourceSchema,
+  operationSteps: portableOperationStepSchema,
+  operationChanges: portableOperationChangeSchema,
+  locks: portableLockSchema,
+  lockGenerations: portableLockGenerationSchema,
+  events: auditEventRecordSchema,
+  outbox: portableOutboxSchema,
+  exports: portableExportSchema,
+};
+
+const portableExportEntitySchema = z.enum(PORTABLE_EXPORT_ENTITIES);
+const checksumSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+
+export interface PortableExportChunk {
+  schemaVersion: typeof PORTABLE_EXPORT_SCHEMA_VERSION;
+  exportId: string;
+  entity: PortableExportEntity;
+  sequence: number;
+  rows: unknown[];
 }
 
-export function serializePortableSnapshot(snapshot: PortableRegistrySnapshot): string {
-  const body = JSON.stringify(sortJsonValue(snapshot));
-  if (new TextEncoder().encode(body).byteLength > MAX_PORTABLE_EXPORT_BYTES) {
-    throw new Error('portable_export_capacity_exceeded');
+export interface PortableExportChunkReference {
+  entity: PortableExportEntity;
+  sequence: number;
+  key: string;
+  rows: number;
+  checksum: string;
+}
+
+export interface PortableExportManifest {
+  schemaVersion: typeof PORTABLE_EXPORT_SCHEMA_VERSION;
+  exportId: string;
+  exportedAt: string;
+  checksum: string;
+  chunks: PortableExportChunkReference[];
+}
+
+const portableExportChunkHeaderSchema = z
+  .object({
+    schemaVersion: z.literal(PORTABLE_EXPORT_SCHEMA_VERSION),
+    exportId: identifierSchema,
+    entity: portableExportEntitySchema,
+    sequence: z.number().int().positive(),
+    rows: z.array(z.unknown()).max(MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK),
+  })
+  .strict();
+
+const portableExportChunkReferenceSchema = z
+  .object({
+    entity: portableExportEntitySchema,
+    sequence: z.number().int().positive(),
+    key: z.string().trim().min(1).max(1024),
+    rows: z.number().int().nonnegative().max(MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK),
+    checksum: checksumSchema,
+  })
+  .strict();
+
+const portableExportManifestSchema = z
+  .object({
+    schemaVersion: z.literal(PORTABLE_EXPORT_SCHEMA_VERSION),
+    exportId: identifierSchema,
+    exportedAt: timestampSchema,
+    checksum: checksumSchema,
+    chunks: z.array(portableExportChunkReferenceSchema),
+  })
+  .strict();
+
+export function assertPortableExportChunk(value: unknown): PortableExportChunk {
+  const chunk = portableExportChunkHeaderSchema.parse(value);
+  const rows = portableEntitySchema[chunk.entity].array().parse(chunk.rows);
+  return { ...chunk, rows };
+}
+
+export function assertPortableExportManifest(value: unknown): PortableExportManifest {
+  const manifest = portableExportManifestSchema.parse(value);
+  let entityIndex = 0;
+  let expectedSequence = 1;
+  for (const [chunkIndex, chunk] of manifest.chunks.entries()) {
+    const currentEntity = PORTABLE_EXPORT_ENTITIES[entityIndex];
+    if (chunk.entity !== currentEntity || chunk.sequence !== expectedSequence) {
+      throw new Error('portable_export_manifest_sequence_invalid');
+    }
+    const next = manifest.chunks[chunkIndex + 1];
+    if (next?.entity === currentEntity) {
+      if (chunk.rows !== MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK) {
+        throw new Error('portable_export_manifest_chunk_boundary_invalid');
+      }
+      expectedSequence += 1;
+      continue;
+    }
+    entityIndex += 1;
+    expectedSequence = 1;
+  }
+  if (entityIndex !== PORTABLE_EXPORT_ENTITIES.length) {
+    throw new Error('portable_export_manifest_entities_incomplete');
+  }
+  if (new Set(manifest.chunks.map((chunk) => chunk.key)).size !== manifest.chunks.length) {
+    throw new Error('portable_export_manifest_chunk_key_duplicate');
+  }
+  return manifest;
+}
+
+export function serializePortableExportObject(value: unknown): string {
+  const body = JSON.stringify(sortJsonValue(value));
+  if (new TextEncoder().encode(body).byteLength > MAX_PORTABLE_EXPORT_OBJECT_BYTES) {
+    throw new Error('portable_export_object_too_large');
   }
   return body;
+}
+
+export function manifestChecksumPayload(
+  manifest: Omit<PortableExportManifest, 'checksum'> | PortableExportManifest,
+): string {
+  return serializePortableExportObject({
+    schemaVersion: manifest.schemaVersion,
+    exportId: manifest.exportId,
+    exportedAt: manifest.exportedAt,
+    chunks: manifest.chunks,
+  });
 }
 
 function sortJsonValue(value: unknown): unknown {
@@ -281,7 +424,7 @@ function sortJsonValue(value: unknown): unknown {
   if (typeof value !== 'object' || value === null) return value;
   return Object.fromEntries(
     Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
       .map(([key, child]) => [key, sortJsonValue(child)]),
   );
 }

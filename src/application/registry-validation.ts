@@ -23,11 +23,7 @@ import {
   validateResourceSpec,
   validateResourceSpecOverrides,
 } from '../domain/resource/validation';
-import {
-  assertPortableExportRowCapacity,
-  registrySnapshotSchema,
-  type PortableRegistrySnapshot,
-} from './registry-snapshot';
+import { registrySnapshotSchema, type PortableRegistrySnapshot } from './registry-snapshot';
 import { MAX_OUTBOX_CONSUMER_ATTEMPTS, MAX_OUTBOX_PRODUCER_ATTEMPTS } from './limits';
 
 export type RegistrySnapshot = PortableRegistrySnapshot;
@@ -579,42 +575,6 @@ function validatePortableSnapshotInvariants(
   snapshot: PortableRegistrySnapshot,
   violations: RegistryViolation[],
 ): void {
-  try {
-    assertPortableExportRowCapacity([
-      snapshot.actors,
-      snapshot.providers,
-      snapshot.profiles,
-      snapshot.profileVersions,
-      snapshot.policies,
-      snapshot.policyVersions,
-      snapshot.resources,
-      snapshot.relationships,
-      snapshot.relationshipHistory,
-      snapshot.bindings,
-      snapshot.bindingHistory,
-      snapshot.health,
-      snapshot.observations,
-      snapshot.drifts,
-      snapshot.operations,
-      snapshot.operationResources,
-      snapshot.operationSteps,
-      snapshot.operationChanges,
-      snapshot.locks,
-      snapshot.lockGenerations,
-      snapshot.events,
-      snapshot.outbox,
-      snapshot.exports,
-    ]);
-  } catch (error) {
-    addViolation(
-      violations,
-      'snapshot',
-      'snapshot',
-      'portable_export_capacity_exceeded',
-      'snapshot',
-      error instanceof Error ? error.message : 'The portable export capacity was exceeded.',
-    );
-  }
   const actorsById = uniqueMap(snapshot.actors, (actor) => actor.id, 'actor', 'id', violations);
   const providersById = uniqueMap(
     snapshot.providers,

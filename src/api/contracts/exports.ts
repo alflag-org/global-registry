@@ -73,7 +73,7 @@ export const createExportRoute = createRoute({
   tags: ['Exports'],
   summary: 'Request a portable registry export',
   description:
-    'Creates an asynchronous export request for the current portable JSON format. Requires the admin role.',
+    'Creates an asynchronous export request for the current chunked portable JSON format. Requires the admin role.',
   ...protectedRouteMetadata('admin'),
   request: {
     body: jsonRequest(
@@ -95,7 +95,7 @@ export const getExportRoute = createRoute({
   tags: ['Exports'],
   summary: 'Get an export request',
   description:
-    'Returns export status and, after completion, its checksum and R2 object key. Requires an active mapped Registry actor.',
+    'Returns export status and, after completion, the checksum of the serialized portable manifest and its R2 key. Requires an active mapped Registry actor.',
   ...protectedRouteMetadata(),
   request: { params: exportIdParamsSchema },
   responses: {
