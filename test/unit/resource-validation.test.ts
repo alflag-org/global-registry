@@ -1,15 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '../../src/domain/errors/global-registry-error';
-import type { JsonObject, ResourceKind } from '../../src/domain/models/global-registry';
+import type { JsonObject, StandardResourceKind } from '../../src/domain/models/global-registry';
 import { materializeEffectiveSpec } from '../../src/domain/resource/profile';
-import { validateRelationshipKinds } from '../../src/domain/resource/relationships';
+import { validateRelationshipKinds as validateRelationshipKindsForDefinition } from '../../src/domain/resource/relationships';
 import {
-  validatePlacement,
-  validateResourceSpec,
-  validateResourceSpecOverrides,
+  validatePlacement as validatePlacementForDefinition,
+  validateResourceSpec as validateResourceSpecForDefinition,
+  validateResourceSpecOverrides as validateResourceSpecOverridesForDefinition,
 } from '../../src/domain/resource/validation';
+import { standardResourceKindDefinition } from '../../src/domain/resource-kind/standard';
 
-const validSpecs: Record<ResourceKind, JsonObject> = {
+const validateResourceSpec = (kind: StandardResourceKind, value: unknown) =>
+  validateResourceSpecForDefinition(standardResourceKindDefinition(kind), value);
+const validateResourceSpecOverrides = (kind: StandardResourceKind, value: unknown) =>
+  validateResourceSpecOverridesForDefinition(standardResourceKindDefinition(kind), value);
+const validatePlacement = (kind: StandardResourceKind, value: unknown) =>
+  validatePlacementForDefinition(standardResourceKindDefinition(kind), value);
+const validateRelationshipKinds = (
+  source: StandardResourceKind,
+  type: Parameters<typeof validateRelationshipKindsForDefinition>[1],
+  target: StandardResourceKind,
+) => validateRelationshipKindsForDefinition(standardResourceKindDefinition(source), type, target);
+
+const validSpecs: Record<StandardResourceKind, JsonObject> = {
   location: { category: 'site' },
   network: { addressFamily: 'ipv4', cidrs: ['10.0.0.0/24'] },
   compute: { substrate: 'vm', architecture: 'amd64', vcpu: 2, memoryMiB: 4096 },
@@ -24,7 +37,7 @@ const validSpecs: Record<ResourceKind, JsonObject> = {
   backup_repository: { repositoryType: 'object_storage', retentionClass: 'daily' },
 };
 
-const completeSpecs: Record<ResourceKind, JsonObject> = {
+const completeSpecs: Record<StandardResourceKind, JsonObject> = {
   ...validSpecs,
   network: {
     addressFamily: 'dual_stack',
@@ -40,7 +53,7 @@ const completeSpecs: Record<ResourceKind, JsonObject> = {
   },
 };
 
-const invalidTypeSpecs: Record<ResourceKind, JsonObject> = {
+const invalidTypeSpecs: Record<StandardResourceKind, JsonObject> = {
   location: { category: 1 },
   network: { addressFamily: 'ipv4', cidrs: '10.0.0.0/24' },
   compute: { substrate: 'vm', architecture: 'amd64', vcpu: '2', memoryMiB: 4096 },
@@ -55,7 +68,7 @@ const invalidTypeSpecs: Record<ResourceKind, JsonObject> = {
   backup_repository: { repositoryType: 'object_storage', retentionClass: 1 },
 };
 
-const invalidValueSpecs: Record<ResourceKind, JsonObject> = {
+const invalidValueSpecs: Record<StandardResourceKind, JsonObject> = {
   location: { category: 'data_center' },
   network: { addressFamily: 'ipv5', cidrs: ['10.0.0.0/24'] },
   compute: { substrate: 'vm', architecture: 'x86', vcpu: 0, memoryMiB: 4096 },
@@ -72,31 +85,40 @@ const invalidValueSpecs: Record<ResourceKind, JsonObject> = {
 
 describe('resource domain validation', () => {
   it.each(Object.entries(validSpecs))('accepts a minimal %s specification', (kind, spec) => {
-    expect(validateResourceSpec(kind as ResourceKind, spec)).toEqual(spec);
+    expect(validateResourceSpec(kind as StandardResourceKind, spec)).toEqual(spec);
   });
 
   it.each(Object.entries(validSpecs))('rejects unknown %s fields', (kind, spec) => {
     expect(() =>
-      validateResourceSpec(kind as ResourceKind, { ...spec, providerSpecificId: 'forbidden' }),
+      validateResourceSpec(kind as StandardResourceKind, {
+        ...spec,
+        providerSpecificId: 'forbidden',
+      }),
     ).toThrowError(ValidationError);
   });
 
   it.each(Object.keys(validSpecs))('rejects missing required %s fields', (kind) => {
-    expect(() => validateResourceSpec(kind as ResourceKind, {})).toThrowError(ValidationError);
+    expect(() => validateResourceSpec(kind as StandardResourceKind, {})).toThrowError(
+      ValidationError,
+    );
   });
 
   it.each(Object.entries(completeSpecs))('accepts a complete %s specification', (kind, spec) => {
-    expect(validateResourceSpec(kind as ResourceKind, spec)).toEqual(spec);
+    expect(validateResourceSpec(kind as StandardResourceKind, spec)).toEqual(spec);
   });
 
   it.each(Object.entries(invalidTypeSpecs))('rejects %s field type mismatches', (kind, spec) => {
-    expect(() => validateResourceSpec(kind as ResourceKind, spec)).toThrowError(ValidationError);
+    expect(() => validateResourceSpec(kind as StandardResourceKind, spec)).toThrowError(
+      ValidationError,
+    );
   });
 
   it.each(Object.entries(invalidValueSpecs))(
     'rejects out-of-range or unknown %s values',
     (kind, spec) => {
-      expect(() => validateResourceSpec(kind as ResourceKind, spec)).toThrowError(ValidationError);
+      expect(() => validateResourceSpec(kind as StandardResourceKind, spec)).toThrowError(
+        ValidationError,
+      );
     },
   );
 

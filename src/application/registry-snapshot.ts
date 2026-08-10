@@ -14,6 +14,7 @@ import {
   providerBindingRecordSchema,
   providerRecordSchema,
   resourceKindSchema,
+  resourceKindDefinitionVersionRecordSchema,
   resourceLifecycleStateSchema,
   resourceRecordSchema,
   resourceRelationshipRecordSchema,
@@ -43,6 +44,7 @@ export const portableProfileSchema = z
   .object({
     key: keySchema,
     resourceKind: resourceKindSchema,
+    resourceKindVersion: revisionSchema,
     status: parentStatusSchema,
     currentVersion: revisionSchema,
     revision: revisionSchema,
@@ -79,9 +81,28 @@ export const portablePolicyVersionSchema = z
     policyKey: keySchema,
     version: revisionSchema,
     resourceKind: resourceKindSchema,
+    resourceKindVersion: revisionSchema,
     spec: policySpecSchema,
     createdAt: timestampSchema,
     createdBy: identifierSchema,
+  })
+  .strict();
+
+export const portableResourceKindDefinitionSchema = z
+  .object({
+    key: resourceKindSchema,
+    status: parentStatusSchema,
+    currentVersion: revisionSchema,
+    revision: revisionSchema,
+    createdAt: timestampSchema,
+    updatedAt: timestampSchema,
+  })
+  .strict();
+
+export const portableResourceKindDefinitionVersionSchema = resourceKindDefinitionVersionRecordSchema
+  .omit({ key: true, parentStatus: true, revision: true })
+  .extend({
+    kindKey: resourceKindSchema,
   })
   .strict();
 
@@ -228,6 +249,8 @@ export const registrySnapshotSchema = z
     exportedAt: timestampSchema,
     actors: z.array(portableActorSchema),
     providers: z.array(providerRecordSchema),
+    resourceKindDefinitions: z.array(portableResourceKindDefinitionSchema),
+    resourceKindDefinitionVersions: z.array(portableResourceKindDefinitionVersionSchema),
     profiles: z.array(portableProfileSchema),
     profileVersions: z.array(portableProfileVersionSchema),
     policies: z.array(portablePolicySchema),
@@ -257,6 +280,8 @@ export type PortableRegistrySnapshot = z.output<typeof registrySnapshotSchema>;
 export const PORTABLE_EXPORT_ENTITIES = [
   'actors',
   'providers',
+  'resourceKindDefinitions',
+  'resourceKindDefinitionVersions',
   'profiles',
   'profileVersions',
   'policies',
@@ -285,6 +310,8 @@ export type PortableExportEntity = (typeof PORTABLE_EXPORT_ENTITIES)[number];
 const portableEntitySchema: Record<PortableExportEntity, z.ZodType> = {
   actors: portableActorSchema,
   providers: providerRecordSchema,
+  resourceKindDefinitions: portableResourceKindDefinitionSchema,
+  resourceKindDefinitionVersions: portableResourceKindDefinitionVersionSchema,
   profiles: portableProfileSchema,
   profileVersions: portableProfileVersionSchema,
   policies: portablePolicySchema,

@@ -8,6 +8,7 @@ import { eventStatements } from './transaction';
 export interface CreateProfileInput {
   key: string;
   resourceKind: Resource['kind'];
+  resourceKindVersion: number;
   spec: JsonObject;
   actorId: string;
   expectedRevision?: number;
@@ -16,6 +17,7 @@ export interface CreateProfileInput {
 export interface ProfileSummary {
   key: string;
   resourceKind: Resource['kind'];
+  resourceKindVersion: number;
   version: number;
   status: ProfileVersion['parentStatus'];
   revision: number;
@@ -26,6 +28,7 @@ export class D1Profiles extends D1Client {
     const existing = await this.first<{
       key: string;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       current_version: number;
       revision: number;
       created_at: string;
@@ -41,10 +44,12 @@ export class D1Profiles extends D1Client {
       await this.db.batch([
         this.statement(
           `INSERT INTO profiles (
-            key, resource_kind, current_version, revision, created_at, updated_at
-          ) VALUES (?, ?, 1, 1, ?, ?)`,
+            key, resource_kind, resource_kind_version, current_version,
+            revision, created_at, updated_at
+          ) VALUES (?, ?, ?, 1, 1, ?, ?)`,
           input.key,
           input.resourceKind,
+          input.resourceKindVersion,
           createdAt,
           createdAt,
         ),
@@ -63,6 +68,7 @@ export class D1Profiles extends D1Client {
         key: input.key,
         version: 1,
         resourceKind: input.resourceKind,
+        resourceKindVersion: input.resourceKindVersion,
         spec,
         parentStatus: 'active',
         revision: 1,
@@ -120,6 +126,7 @@ export class D1Profiles extends D1Client {
       key: input.key,
       version,
       resourceKind: input.resourceKind,
+      resourceKindVersion: input.resourceKindVersion,
       spec,
       parentStatus: 'active',
       revision: input.expectedRevision + 1,
@@ -131,13 +138,14 @@ export class D1Profiles extends D1Client {
     const row = await this.first<{
       key: string;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       revision: number;
       status: ProfileVersion['parentStatus'];
       spec_json: string;
       created_at: string;
       version: number;
     }>(
-      `SELECT p.key, p.resource_kind, p.revision, p.status,
+      `SELECT p.key, p.resource_kind, p.resource_kind_version, p.revision, p.status,
           pv.spec_json, pv.created_at, pv.version
        FROM profiles p JOIN profile_versions pv ON pv.profile_key = p.key
        WHERE p.key = ? AND pv.version = ?`,
@@ -150,6 +158,7 @@ export class D1Profiles extends D1Client {
           key: row.key,
           version: row.version,
           resourceKind: row.resource_kind,
+          resourceKindVersion: row.resource_kind_version,
           spec: parseJsonObject(row.spec_json, 'profile spec'),
           parentStatus: row.status,
           revision: row.revision,
@@ -161,11 +170,13 @@ export class D1Profiles extends D1Client {
     const row = await this.first<{
       key: string;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       current_version: number;
       status: ProfileVersion['parentStatus'];
       revision: number;
     }>(
-      'SELECT key, resource_kind, current_version, status, revision FROM profiles WHERE key = ?',
+      `SELECT key, resource_kind, resource_kind_version, current_version, status, revision
+       FROM profiles WHERE key = ?`,
       key,
     );
     return row === null
@@ -173,6 +184,7 @@ export class D1Profiles extends D1Client {
       : {
           key: row.key,
           resourceKind: row.resource_kind,
+          resourceKindVersion: row.resource_kind_version,
           version: row.current_version,
           status: row.status,
           revision: row.revision,
@@ -229,16 +241,19 @@ export class D1Profiles extends D1Client {
     const rows = await this.all<{
       key: string;
       resource_kind: Resource['kind'];
+      resource_kind_version: number;
       current_version: number;
       status: ProfileVersion['parentStatus'];
       revision: number;
     }>(
-      'SELECT key, resource_kind, current_version, status, revision FROM profiles ORDER BY key LIMIT ?',
+      `SELECT key, resource_kind, resource_kind_version, current_version, status, revision
+       FROM profiles ORDER BY key LIMIT ?`,
       boundedPageLimit(limit),
     );
     return rows.map((row) => ({
       key: row.key,
       resourceKind: row.resource_kind,
+      resourceKindVersion: row.resource_kind_version,
       version: row.current_version,
       status: row.status,
       revision: row.revision,

@@ -7,10 +7,12 @@ import type {
   Operation,
   RelationshipType,
   Resource,
+  ResourceKindDefinitionVersion,
   ResourceRelationship,
 } from '../domain/models/global-registry';
 import { assertRunningOperationChange } from '../domain/operation/validation';
 import { validateRelationshipKinds } from '../domain/resource/relationships';
+import { isTerminalLifecycleState } from '../domain/lifecycle/lifecycle';
 
 interface CreateRelationshipCommand {
   sourceKey: string;
@@ -33,6 +35,10 @@ interface RemoveRelationshipCommand {
 interface RelationshipStore {
   getResource(key: string): Promise<Resource | null>;
   getResourceById(id: string): Promise<Resource | null>;
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
   getOperation(id: string): Promise<Operation | null>;
   getRelationship(id: string): Promise<ResourceRelationship | null>;
   createRelationship(input: CreateRelationshipCommand): Promise<ResourceRelationship>;
@@ -64,14 +70,15 @@ export class RelationshipService {
         'A resource cannot have a relationship to itself.',
       );
     }
-    if (source.lifecycleState === 'retired') {
+    const sourceDefinition = await this.loadDefinition(source);
+    if (isTerminalLifecycleState(sourceDefinition, source.lifecycleState)) {
       throw new ConflictError(
-        'resource_retired',
-        'A retired resource cannot receive new relationships.',
+        'resource_terminal',
+        'A Resource in a terminal lifecycle state cannot receive new relationships.',
         { resourceKey: source.key },
       );
     }
-    validateRelationshipKinds(source.kind, input.relationshipType, target.kind);
+    validateRelationshipKinds(sourceDefinition, input.relationshipType, target.kind);
     assertRunningOperationChange(operation, {
       action: 'relationship.create',
       resourceKey: source.key,
@@ -97,10 +104,11 @@ export class RelationshipService {
         currentRevision: relationship.revision,
       });
     }
-    if (source.lifecycleState !== 'retired') {
+    const sourceDefinition = await this.loadDefinition(source);
+    if (!isTerminalLifecycleState(sourceDefinition, source.lifecycleState)) {
       throw new ConflictError(
         'relationship_removal_lifecycle_conflict',
-        'A relationship can be removed only after its source resource is retired.',
+        'A relationship can be removed only when its source Resource is in a terminal lifecycle state.',
         { resourceKey: source.key, lifecycleState: source.lifecycleState },
       );
     }
@@ -110,5 +118,19 @@ export class RelationshipService {
       relationshipId: relationship.id,
     });
     await this.store.removeRelationship(input);
+  }
+
+  private async loadDefinition(resource: Resource): Promise<ResourceKindDefinitionVersion> {
+    const definition = await this.store.getResourceKindDefinition(
+      resource.kind,
+      resource.kindVersion,
+    );
+    if (definition === null) {
+      throw new NotFoundError(
+        'Resource kind definition',
+        `${resource.kind}@${resource.kindVersion}`,
+      );
+    }
+    return definition;
   }
 }

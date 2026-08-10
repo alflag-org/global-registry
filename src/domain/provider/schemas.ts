@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { RESOURCE_KINDS } from '../models/global-registry';
 import { isBoundedJsonObject } from '../models/json';
+import { resourceKindSchema } from '../resource-kind/schemas';
 import { hasUniqueValues } from '../unique-values';
 import { PROVIDER_STATUSES } from './model';
 
@@ -46,7 +46,7 @@ export const credentialReferenceSchema = z
 export const providerCapabilitiesSchema = z
   .object({
     resourceKinds: z
-      .array(z.enum(RESOURCE_KINDS))
+      .array(resourceKindSchema)
       .min(1)
       .refine(hasUniqueValues, 'Resource kinds must be unique.'),
     features: z.array(providerCapabilitySchema).refine(hasUniqueValues, 'Features must be unique.'),

@@ -11,13 +11,19 @@ import type {
   Provider,
   ProviderBinding,
   Resource,
+  ResourceKindDefinitionVersion,
 } from '../domain/models/global-registry';
+import { isTerminalLifecycleState } from '../domain/lifecycle/lifecycle';
 import { assertRunningOperationChange } from '../domain/operation/validation';
 import { evaluatePolicy } from '../domain/policy/evaluator';
 import { evaluateProviderCompatibility } from '../domain/provider/compatibility';
 
 interface BindingStore {
   getResource(key: string): Promise<Resource | null>;
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
   getProvider(id: string): Promise<Provider | null>;
   getOperation(id: string): Promise<Operation | null>;
   getPolicyVersion(namespace: string, key: string, version: number): Promise<PolicyVersion | null>;
@@ -56,10 +62,11 @@ export class BindingService {
 
   async replace(input: ReplaceBindingCommand): Promise<ProviderBinding> {
     const resource = await this.loadResourceAtRevision(input.resourceKey, input.expectedRevision);
-    if (resource.lifecycleState === 'retired') {
+    const definition = await this.loadDefinition(resource);
+    if (isTerminalLifecycleState(definition, resource.lifecycleState)) {
       throw new ConflictError(
-        'resource_retired',
-        'A retired resource cannot receive a provider binding.',
+        'resource_terminal',
+        'A Resource in a terminal lifecycle state cannot receive a provider binding.',
         { resourceKey: resource.key },
       );
     }
@@ -86,7 +93,7 @@ export class BindingService {
       boundAt: new Date(0).toISOString(),
       boundBy: input.actorId,
     };
-    const compatibility = evaluateProviderCompatibility({ resource, provider });
+    const compatibility = evaluateProviderCompatibility({ resource, provider, definition });
     if (!compatibility.valid) {
       throw new ValidationError(
         'provider_incompatible',
@@ -106,7 +113,7 @@ export class BindingService {
           `${resource.policy.namespace}/${resource.policy.key}@${resource.policy.version}`,
         );
       }
-      const evaluation = evaluatePolicy({ resource, policy, provider, binding });
+      const evaluation = evaluatePolicy({ resource, policy, definition, provider, binding });
       if (!evaluation.valid) {
         throw new ValidationError(
           'policy_violation',
@@ -124,10 +131,11 @@ export class BindingService {
 
   async remove(input: RemoveBindingCommand): Promise<void> {
     const resource = await this.loadResourceAtRevision(input.resourceKey, input.expectedRevision);
-    if (resource.lifecycleState !== 'retired') {
+    const definition = await this.loadDefinition(resource);
+    if (!isTerminalLifecycleState(definition, resource.lifecycleState)) {
       throw new ConflictError(
         'binding_removal_lifecycle_conflict',
-        'A provider binding can be removed only after the resource is retired.',
+        'A provider binding can be removed only from a Resource in a terminal lifecycle state.',
         { resourceKey: resource.key, lifecycleState: resource.lifecycleState },
       );
     }
@@ -156,5 +164,19 @@ export class BindingService {
     const operation = await this.store.getOperation(id);
     if (operation === null) throw new NotFoundError('Operation', id);
     return operation;
+  }
+
+  private async loadDefinition(resource: Resource): Promise<ResourceKindDefinitionVersion> {
+    const definition = await this.store.getResourceKindDefinition(
+      resource.kind,
+      resource.kindVersion,
+    );
+    if (definition === null) {
+      throw new NotFoundError(
+        'Resource kind definition',
+        `${resource.kind}@${resource.kindVersion}`,
+      );
+    }
+    return definition;
   }
 }

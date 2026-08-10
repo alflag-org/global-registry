@@ -1,15 +1,16 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import type { PolicySummary } from '../../application/policies';
 import type { PolicyVersion } from '../../domain/models/global-registry';
-import { policySpecSchema, policyVersionRecordSchema } from '../../domain/models/schemas';
-import { policyDefinitionSchema } from '../../domain/policy/schemas';
+import { policyVersionRecordSchema } from '../../domain/models/schemas';
 import {
   jsonRequest,
+  jsonObjectSchema,
   jsonResponse,
   keySchema,
   pageLimitSchema,
   parseResponse,
   protectedRouteMetadata,
+  resourceKindSchema,
   revisionSchema,
   versionParentStatusSchema,
 } from './common';
@@ -20,25 +21,16 @@ const listPoliciesQuerySchema = z
   .strict()
   .openapi('ListPoliciesQuery');
 
-function policyVersionRequestVariant<const Index extends 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7>(
-  index: Index,
-) {
-  return policyDefinitionSchema.options[index]
-    .extend({ expectedRevision: revisionSchema.optional() })
-    .strict();
-}
-
 const createPolicyVersionRequestSchema = z
-  .discriminatedUnion('resourceKind', [
-    policyVersionRequestVariant(0),
-    policyVersionRequestVariant(1),
-    policyVersionRequestVariant(2),
-    policyVersionRequestVariant(3),
-    policyVersionRequestVariant(4),
-    policyVersionRequestVariant(5),
-    policyVersionRequestVariant(6),
-    policyVersionRequestVariant(7),
-  ])
+  .object({
+    namespace: keySchema,
+    key: keySchema,
+    resourceKind: resourceKindSchema,
+    resourceKindVersion: revisionSchema,
+    spec: jsonObjectSchema,
+    expectedRevision: revisionSchema.optional(),
+  })
+  .strict()
   .openapi('CreatePolicyVersionRequest');
 
 const updatePolicyStatusRequestSchema = z
@@ -49,7 +41,7 @@ const updatePolicyStatusRequestSchema = z
   .strict()
   .openapi('UpdatePolicyStatusRequest');
 
-const policySpecResponseSchema = policySpecSchema.openapi('PolicySpec');
+const policySpecResponseSchema = jsonObjectSchema;
 
 const policyVersionResponseSchema = policyVersionRecordSchema
   .extend({
@@ -57,6 +49,9 @@ const policyVersionResponseSchema = policyVersionRecordSchema
     key: policyVersionRecordSchema.shape.key.openapi({ readOnly: true }),
     version: policyVersionRecordSchema.shape.version.openapi({ readOnly: true }),
     resourceKind: policyVersionRecordSchema.shape.resourceKind.openapi({ readOnly: true }),
+    resourceKindVersion: policyVersionRecordSchema.shape.resourceKindVersion.openapi({
+      readOnly: true,
+    }),
     spec: policySpecResponseSchema,
     parentStatus: policyVersionRecordSchema.shape.parentStatus.openapi({ readOnly: true }),
     revision: policyVersionRecordSchema.shape.revision.openapi({ readOnly: true }),
@@ -70,12 +65,16 @@ const policySummaryResponseSchema = policyVersionRecordSchema
     namespace: true,
     key: true,
     resourceKind: true,
+    resourceKindVersion: true,
     version: true,
   })
   .extend({
     namespace: policyVersionRecordSchema.shape.namespace.openapi({ readOnly: true }),
     key: policyVersionRecordSchema.shape.key.openapi({ readOnly: true }),
     resourceKind: policyVersionRecordSchema.shape.resourceKind.openapi({ readOnly: true }),
+    resourceKindVersion: policyVersionRecordSchema.shape.resourceKindVersion.openapi({
+      readOnly: true,
+    }),
     version: policyVersionRecordSchema.shape.version.openapi({ readOnly: true }),
     status: versionParentStatusSchema,
   })
@@ -129,6 +128,7 @@ const policyVersionExample = {
   key: 'standard',
   version: 1,
   resourceKind: 'compute',
+  resourceKindVersion: 1,
   spec: { memoryMiB: { maximum: 8192 } },
   parentStatus: 'active',
   revision: 1,
@@ -139,6 +139,7 @@ const policySummaryExample = {
   namespace: policyVersionExample.namespace,
   key: policyVersionExample.key,
   resourceKind: policyVersionExample.resourceKind,
+  resourceKindVersion: policyVersionExample.resourceKindVersion,
   version: 1,
   status: 'active',
   revision: 1,
@@ -161,6 +162,7 @@ export const createPolicyVersionRoute = createRoute({
         namespace: policyVersionExample.namespace,
         key: policyVersionExample.key,
         resourceKind: policyVersionExample.resourceKind,
+        resourceKindVersion: policyVersionExample.resourceKindVersion,
         spec: policyVersionExample.spec,
       },
     ),

@@ -215,7 +215,7 @@ export async function findDomainBoundaryViolations(sourceRoot = defaultSourceRoo
   )) {
     const analysis = await importAnalysis(file);
     for (const target of await internalTargetsFrom(file, analysis, checkedSourceRoot, violations)) {
-      if (/^domain\/(?:lifecycle|policy|provider|resource)\//.test(target)) {
+      if (/^domain\/(?:lifecycle|policy|provider|resource|resource-kind)\//.test(target)) {
         d1DecisionImports.push(displayPath(file));
         break;
       }

@@ -1,4 +1,4 @@
-export const RESOURCE_KINDS = [
+export const STANDARD_RESOURCE_KINDS = [
   'location',
   'network',
   'compute',
@@ -9,9 +9,10 @@ export const RESOURCE_KINDS = [
   'backup_repository',
 ] as const;
 
-export type ResourceKind = (typeof RESOURCE_KINDS)[number];
+export type StandardResourceKind = (typeof STANDARD_RESOURCE_KINDS)[number];
+export type ResourceKind = string;
 
-export const RESOURCE_LIFECYCLE_STATES = [
+export const STANDARD_RESOURCE_LIFECYCLE_STATES = [
   'absent',
   'allocated',
   'bootstrapped',
@@ -26,7 +27,13 @@ export const RESOURCE_LIFECYCLE_STATES = [
   'retired',
 ] as const;
 
-export type ResourceLifecycleState = (typeof RESOURCE_LIFECYCLE_STATES)[number];
+export type ResourceLifecycleState = string;
+
+export const RESOURCE_SPECIFICATION_MODES = ['standard', 'opaque'] as const;
+export type ResourceSpecificationMode = (typeof RESOURCE_SPECIFICATION_MODES)[number];
+
+export const RESOURCE_PLACEMENT_MODES = ['root', 'located'] as const;
+export type ResourcePlacementMode = (typeof RESOURCE_PLACEMENT_MODES)[number];
 
 export const ACTOR_ROLES = [
   'admin',
@@ -97,6 +104,7 @@ export interface Resource {
   id: string;
   key: string;
   kind: ResourceKind;
+  kindVersion: number;
   name: string;
   profile?: VersionedReference;
   policy?: PolicyReference;
@@ -126,10 +134,38 @@ export interface Provider {
 export const VERSION_PARENT_STATUSES = ['active', 'deprecated', 'retired'] as const;
 export type VersionParentStatus = (typeof VERSION_PARENT_STATUSES)[number];
 
+export interface ResourceLifecycleTransition {
+  from: ResourceLifecycleState;
+  to: ResourceLifecycleState;
+  destructive: boolean;
+}
+
+export interface ResourceKindRelationshipRule {
+  relationshipType: RelationshipType;
+  targetKinds: readonly string[];
+}
+
+export interface ResourceKindDefinitionVersion {
+  key: ResourceKind;
+  version: number;
+  states: readonly ResourceLifecycleState[];
+  initialState: ResourceLifecycleState;
+  terminalStates: readonly ResourceLifecycleState[];
+  transitions: readonly ResourceLifecycleTransition[];
+  placementMode: ResourcePlacementMode;
+  specificationMode: ResourceSpecificationMode;
+  relationshipRules: readonly ResourceKindRelationshipRule[];
+  parentStatus: VersionParentStatus;
+  revision: number;
+  createdAt: string;
+  createdBy?: string;
+}
+
 export interface ProfileVersion {
   key: string;
   version: number;
   resourceKind: ResourceKind;
+  resourceKindVersion: number;
   spec: JsonObject;
   parentStatus: VersionParentStatus;
   revision: number;
@@ -141,6 +177,7 @@ export interface PolicyVersion {
   key: string;
   version: number;
   resourceKind: ResourceKind;
+  resourceKindVersion: number;
   spec: JsonObject;
   parentStatus: VersionParentStatus;
   revision: number;
@@ -281,6 +318,8 @@ export interface CreateResource {
   actorId: string;
   key: string;
   kind: ResourceKind;
+  kindVersion: number;
+  initialState: ResourceLifecycleState;
   name: string;
   placement: JsonObject;
   specOverrides: JsonObject;

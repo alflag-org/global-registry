@@ -3,6 +3,7 @@ import type {
   JsonObject,
   PolicyVersion,
   ResourceKind,
+  ResourceKindDefinitionVersion,
   VersionParentStatus,
 } from '../domain/models/global-registry';
 import { validatePolicyDefinition } from '../domain/policy/validation';
@@ -12,17 +13,23 @@ export interface PolicySummary {
   namespace: string;
   key: string;
   resourceKind: ResourceKind;
+  resourceKindVersion: number;
   version: number;
   status: VersionParentStatus;
   revision: number;
 }
 
 interface PolicyStore {
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
   getPolicySummary(namespace: string, key: string): Promise<PolicySummary | null>;
   createPolicyVersion(input: {
     namespace: string;
     key: string;
     resourceKind: ResourceKind;
+    resourceKindVersion: number;
     spec: JsonObject;
     actorId: string;
     expectedRevision?: number;
@@ -43,16 +50,42 @@ export class PolicyService {
     namespace: string;
     key: string;
     resourceKind: ResourceKind;
+    resourceKindVersion: number;
     spec: JsonObject;
     actorId: string;
     expectedRevision?: number;
   }): Promise<PolicyVersion> {
-    const definition = validatePolicyDefinition({
-      namespace: input.namespace,
-      key: input.key,
-      resourceKind: input.resourceKind,
-      spec: input.spec,
-    });
+    const resourceKindDefinition = await this.store.getResourceKindDefinition(
+      input.resourceKind,
+      input.resourceKindVersion,
+    );
+    if (resourceKindDefinition === null) {
+      throw new ValidationError(
+        'resource_kind_definition_not_found',
+        'The referenced Resource kind definition does not exist.',
+      );
+    }
+    if (resourceKindDefinition.parentStatus !== 'active') {
+      throw new ConflictError(
+        'resource_kind_definition_not_active',
+        'New Policy versions require an active Resource kind definition.',
+        {
+          key: resourceKindDefinition.key,
+          version: resourceKindDefinition.version,
+          status: resourceKindDefinition.parentStatus,
+        },
+      );
+    }
+    const definition = validatePolicyDefinition(
+      {
+        namespace: input.namespace,
+        key: input.key,
+        resourceKind: input.resourceKind,
+        resourceKindVersion: input.resourceKindVersion,
+        spec: input.spec,
+      },
+      resourceKindDefinition,
+    );
     const current = await this.store.getPolicySummary(input.namespace, input.key);
     if (current === null && input.expectedRevision !== undefined) {
       throw new ConflictError(
@@ -87,13 +120,17 @@ export class PolicyService {
           { namespace: input.namespace, key: input.key, status: current.status },
         );
       }
-      if (current.resourceKind !== input.resourceKind) {
+      if (
+        current.resourceKind !== input.resourceKind ||
+        current.resourceKindVersion !== input.resourceKindVersion
+      ) {
         throw new ValidationError('policy_kind_immutable', 'A policy cannot change resource kind.');
       }
     }
     return this.store.createPolicyVersion({
       ...input,
       resourceKind: definition.resourceKind,
+      resourceKindVersion: definition.resourceKindVersion,
       spec: definition.spec,
     });
   }

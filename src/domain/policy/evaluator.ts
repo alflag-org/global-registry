@@ -1,13 +1,21 @@
 import type { DomainViolation } from '../errors/violations';
-import type { Provider, ProviderBinding, Resource, ResourceKind } from '../models/global-registry';
+import type {
+  Provider,
+  ProviderBinding,
+  Resource,
+  ResourceKindDefinitionVersion,
+  StandardResourceKind,
+} from '../models/global-registry';
 import { providerCapabilitiesSchema } from '../provider/schemas';
 import { placementSchema, resourceSpecSchemas } from '../resource/schemas';
+import { isStandardResourceKind } from '../resource-kind/validation';
 import type { PolicyVersionDefinition } from './model';
-import { policySpecSchemas } from './schemas';
+import { commonPolicySpecSchema, policySpecSchemas } from './schemas';
 
 interface PolicyEvaluationInput {
   resource: Resource;
   policy: PolicyVersionDefinition;
+  definition: ResourceKindDefinitionVersion;
   provider?: Provider;
   binding?: ProviderBinding;
 }
@@ -18,22 +26,35 @@ interface PolicyEvaluationResult {
 }
 
 export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluationResult {
-  if (input.policy.resourceKind !== input.resource.kind) {
+  if (
+    input.policy.resourceKind !== input.resource.kind ||
+    input.policy.resourceKindVersion !== input.resource.kindVersion
+  ) {
     return {
       valid: false,
       violations: [
         {
           code: 'policy_resource_kind_mismatch',
           path: 'policy.resourceKind',
-          message: `Policy kind ${input.policy.resourceKind} does not match resource kind ${input.resource.kind}.`,
+          message: `Policy kind ${input.policy.resourceKind}@${input.policy.resourceKindVersion} does not match resource kind ${input.resource.kind}@${input.resource.kindVersion}.`,
         },
       ],
     };
   }
 
-  const spec = resourceSpecSchemas[input.resource.kind].parse(input.resource.spec);
   const placement = placementSchema.parse(input.resource.placement);
-  const policySpec = policySpecSchemas[input.policy.resourceKind].parse(input.policy.spec);
+  const standardKind =
+    input.definition.specificationMode === 'standard' && isStandardResourceKind(input.resource.kind)
+      ? input.resource.kind
+      : undefined;
+  const spec =
+    standardKind === undefined
+      ? input.resource.spec
+      : resourceSpecSchemas[standardKind].parse(input.resource.spec);
+  const policySpec =
+    standardKind === undefined
+      ? commonPolicySpecSchema.parse(input.policy.spec)
+      : policySpecSchemas[standardKind].parse(input.policy.spec);
   const violations: DomainViolation[] = [];
 
   checkAllowed(
@@ -57,12 +78,12 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyEvaluationRe
     }
   }
 
-  evaluateKindPolicy(input.resource.kind, spec, policySpec, violations);
+  if (standardKind !== undefined) evaluateKindPolicy(standardKind, spec, policySpec, violations);
   return { valid: violations.length === 0, violations };
 }
 
 function evaluateKindPolicy(
-  kind: ResourceKind,
+  kind: StandardResourceKind,
   spec: Record<string, unknown>,
   policy: Record<string, unknown>,
   violations: DomainViolation[],

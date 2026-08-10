@@ -1,4 +1,4 @@
-import { GlobalRegistryError } from '../domain/errors/global-registry-error';
+import { GlobalRegistryError, ValidationError } from '../domain/errors/global-registry-error';
 import { ensureJsonObject } from '../domain/models/json';
 import type { DomainViolation } from '../domain/errors/violations';
 import { zodViolations } from '../domain/errors/violations';
@@ -10,12 +10,14 @@ import type {
   Provider,
   ProviderBinding,
   Resource,
+  ResourceKindDefinitionVersion,
   ResourceRelationship,
 } from '../domain/models/global-registry';
 import { evaluatePolicy } from '../domain/policy/evaluator';
 import { validatePolicyDefinition } from '../domain/policy/validation';
 import { evaluateProviderCompatibility } from '../domain/provider/compatibility';
 import { validateProviderDefinition } from '../domain/provider/validation';
+import { assertResourceKindDefinitionVersion } from '../domain/resource-kind/validation';
 import { materializeEffectiveSpec } from '../domain/resource/profile';
 import { validateRelationshipKinds } from '../domain/resource/relationships';
 import {
@@ -29,6 +31,7 @@ import { MAX_OUTBOX_CONSUMER_ATTEMPTS, MAX_OUTBOX_PRODUCER_ATTEMPTS } from './li
 export type RegistrySnapshot = PortableRegistrySnapshot;
 
 interface DomainRegistrySnapshot {
+  resourceKindDefinitions: ResourceKindDefinitionVersion[];
   resources: Resource[];
   providers: Provider[];
   profiles: ProfileVersion[];
@@ -52,6 +55,7 @@ interface RegistryValidationReport {
     policies: number;
     bindings: number;
     relationships: number;
+    resourceKindDefinitions: number;
   };
   violations: RegistryViolation[];
 }
@@ -106,11 +110,33 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
     'version',
     violations,
   );
+  const definitionsByReference = uniqueMap(
+    snapshot.resourceKindDefinitions,
+    (definition) => `${definition.key}@${definition.version}`,
+    'resource_kind_definition',
+    'version',
+    violations,
+  );
+
+  for (const definition of snapshot.resourceKindDefinitions) {
+    capture(
+      violations,
+      'resource_kind_definition',
+      `${definition.key}@${definition.version}`,
+      definition,
+      () => assertResourceKindDefinitionVersion(definition),
+    );
+  }
 
   for (const profile of snapshot.profiles) {
     capture(violations, 'profile', `${profile.key}@${profile.version}`, profile, () => {
       ensureJsonObject(profile.spec, `profile ${profile.key} spec`);
-      validateResourceSpecOverrides(profile.resourceKind, profile.spec);
+      const definition = requireDefinition(
+        definitionsByReference,
+        profile.resourceKind,
+        profile.resourceKindVersion,
+      );
+      validateResourceSpecOverrides(definition, profile.spec);
     });
   }
 
@@ -122,12 +148,21 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
       policy,
       () => {
         ensureJsonObject(policy.spec, `policy ${policy.namespace}/${policy.key} spec`);
-        validatePolicyDefinition({
-          namespace: policy.namespace,
-          key: policy.key,
-          resourceKind: policy.resourceKind,
-          spec: policy.spec,
-        });
+        const definition = requireDefinition(
+          definitionsByReference,
+          policy.resourceKind,
+          policy.resourceKindVersion,
+        );
+        validatePolicyDefinition(
+          {
+            namespace: policy.namespace,
+            key: policy.key,
+            resourceKind: policy.resourceKind,
+            resourceKindVersion: policy.resourceKindVersion,
+            spec: policy.spec,
+          },
+          definition,
+        );
       },
     );
   }
@@ -151,12 +186,23 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
 
   for (const resource of snapshot.resources) {
     capture(violations, 'resource', resource.key, resource, () => {
+      const definition = requireDefinition(
+        definitionsByReference,
+        resource.kind,
+        resource.kindVersion,
+      );
       ensureJsonObject(resource.placement, `resource ${resource.key} placement`);
       ensureJsonObject(resource.specOverrides, `resource ${resource.key} spec overrides`);
       ensureJsonObject(resource.spec, `resource ${resource.key} effective spec`);
-      const placement = validatePlacement(resource.kind, resource.placement);
-      const overrides = validateResourceSpecOverrides(resource.kind, resource.specOverrides);
-      validateResourceSpec(resource.kind, resource.spec);
+      const placement = validatePlacement(definition, resource.placement);
+      const overrides = validateResourceSpecOverrides(definition, resource.specOverrides);
+      validateResourceSpec(definition, resource.spec);
+      if (!definition.states.includes(resource.lifecycleState)) {
+        throw new ValidationError(
+          'resource_lifecycle_state_not_defined',
+          `Lifecycle state ${resource.lifecycleState} is not defined by ${definition.key}@${definition.version}.`,
+        );
+      }
 
       const locationKey =
         typeof placement.locationKey === 'string' ? placement.locationKey : undefined;
@@ -169,19 +215,24 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
             resource.key,
             'location_not_found',
             'placement.locationKey',
-            `Location resource ${locationKey} does not exist.`,
+            `Placement-root Resource ${locationKey} does not exist.`,
             locationKey,
           );
-        } else if (location.kind !== 'location') {
-          addViolation(
-            violations,
-            'resource',
-            resource.key,
-            'placement_location_kind_mismatch',
-            'placement.locationKey',
-            `${locationKey} is ${location.kind}, not location.`,
-            locationKey,
+        } else {
+          const locationDefinition = definitionsByReference.get(
+            `${location.kind}@${location.kindVersion}`,
           );
+          if (locationDefinition?.placementMode !== 'root') {
+            addViolation(
+              violations,
+              'resource',
+              resource.key,
+              'placement_location_kind_mismatch',
+              'placement.locationKey',
+              `${locationKey} is not a placement-root Resource.`,
+              locationKey,
+            );
+          }
         }
       }
 
@@ -203,7 +254,8 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
       if (
         resource.profile !== undefined &&
         profile !== undefined &&
-        profile.resourceKind !== resource.kind
+        (profile.resourceKind !== resource.kind ||
+          profile.resourceKindVersion !== resource.kindVersion)
       ) {
         addViolation(
           violations,
@@ -211,7 +263,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
           resource.key,
           'profile_kind_mismatch',
           'profile',
-          `Profile kind ${profile.resourceKind} does not match ${resource.kind}.`,
+          `Profile kind ${profile.resourceKind}@${profile.resourceKindVersion} does not match ${resource.kind}@${resource.kindVersion}.`,
           { key: resource.profile.key, version: resource.profile.version },
         );
       }
@@ -252,7 +304,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
             'resource',
             resource.key,
             resource,
-            evaluatePolicy({ resource, policy }).violations,
+            evaluatePolicy({ resource, policy, definition }).violations,
           );
         }
       }
@@ -320,6 +372,11 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
     if (resource === undefined || provider === undefined) continue;
 
     capture(violations, 'binding', bindingKey, binding, () => {
+      const definition = requireDefinition(
+        definitionsByReference,
+        resource.kind,
+        resource.kindVersion,
+      );
       ensureJsonObject(binding.locator, `binding ${bindingKey} locator`);
       appendEvaluation(
         violations,
@@ -329,6 +386,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
         evaluateProviderCompatibility({
           resource,
           provider,
+          definition,
           requireActive: false,
         }).violations,
       );
@@ -342,7 +400,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
             'binding',
             bindingKey,
             binding,
-            evaluatePolicy({ resource, policy, provider, binding }).violations,
+            evaluatePolicy({ resource, policy, definition, provider, binding }).violations,
           );
         }
       }
@@ -405,7 +463,8 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
       continue;
     }
     capture(violations, 'relationship', relationship.id, relationship, () => {
-      validateRelationshipKinds(source.kind, relationship.relationshipType, target.kind);
+      const definition = requireDefinition(definitionsByReference, source.kind, source.kindVersion);
+      validateRelationshipKinds(definition, relationship.relationshipType, target.kind);
     });
   }
 
@@ -417,6 +476,7 @@ export function validateRegistrySnapshot(value: unknown): RegistryValidationRepo
       policies: snapshot.policies.length,
       bindings: snapshot.bindings.length,
       relationships: snapshot.relationships.length,
+      resourceKindDefinitions: snapshot.resourceKindDefinitions.length,
     },
     violations,
   );
@@ -453,6 +513,66 @@ function toDomainRegistrySnapshot(
   snapshot: PortableRegistrySnapshot,
   violations: RegistryViolation[],
 ): DomainRegistrySnapshot {
+  const definitionParentsByKey = uniqueMap(
+    snapshot.resourceKindDefinitions,
+    (definition) => definition.key,
+    'resource_kind_definition_parent',
+    'key',
+    violations,
+  );
+  const definitionVersionsByReference = uniqueMap(
+    snapshot.resourceKindDefinitionVersions,
+    (definition) => `${definition.kindKey}@${definition.version}`,
+    'resource_kind_definition_version',
+    'version',
+    violations,
+  );
+  const resourceKindDefinitions: ResourceKindDefinitionVersion[] = [];
+  for (const parent of snapshot.resourceKindDefinitions) {
+    const reference = `${parent.key}@${parent.currentVersion}`;
+    if (!definitionVersionsByReference.has(reference)) {
+      addViolation(
+        violations,
+        'resource_kind_definition_parent',
+        parent.key,
+        'current_version_not_found',
+        'currentVersion',
+        `Resource kind definition current version ${reference} is not present.`,
+        parent.currentVersion,
+      );
+    }
+  }
+  for (const version of snapshot.resourceKindDefinitionVersions) {
+    const parent = definitionParentsByKey.get(version.kindKey);
+    if (parent === undefined) {
+      addViolation(
+        violations,
+        'resource_kind_definition_version',
+        `${version.kindKey}@${version.version}`,
+        'definition_parent_not_found',
+        'kindKey',
+        `Resource kind definition parent ${version.kindKey} does not exist.`,
+        version.kindKey,
+      );
+      continue;
+    }
+    resourceKindDefinitions.push({
+      key: version.kindKey,
+      version: version.version,
+      states: version.states,
+      initialState: version.initialState,
+      terminalStates: version.terminalStates,
+      transitions: version.transitions,
+      placementMode: version.placementMode,
+      specificationMode: version.specificationMode,
+      relationshipRules: version.relationshipRules,
+      parentStatus: parent.status,
+      revision: parent.revision,
+      createdAt: version.createdAt,
+      ...(version.createdBy === undefined ? {} : { createdBy: version.createdBy }),
+    });
+  }
+
   const profilesByKey = uniqueMap(
     snapshot.profiles,
     (profile) => profile.key,
@@ -500,6 +620,7 @@ function toDomainRegistrySnapshot(
       key: version.profileKey,
       version: version.version,
       resourceKind: parent.resourceKind,
+      resourceKindVersion: parent.resourceKindVersion,
       spec: version.spec as JsonObject,
       parentStatus: parent.status,
       revision: parent.revision,
@@ -555,6 +676,7 @@ function toDomainRegistrySnapshot(
       key: version.policyKey,
       version: version.version,
       resourceKind: version.resourceKind,
+      resourceKindVersion: version.resourceKindVersion,
       spec: version.spec as JsonObject,
       parentStatus: parent.status,
       revision: parent.revision,
@@ -563,6 +685,7 @@ function toDomainRegistrySnapshot(
   }
 
   return {
+    resourceKindDefinitions,
     resources: snapshot.resources as Resource[],
     providers: snapshot.providers as Provider[],
     profiles,
@@ -613,6 +736,68 @@ function validatePortableSnapshotInvariants(
     violations,
   );
 
+  const definitionParentsByKey = uniqueMap(
+    snapshot.resourceKindDefinitions,
+    (definition) => definition.key,
+    'resource_kind_definition_parent',
+    'key',
+    violations,
+  );
+  const definitionVersionsByReference = uniqueMap(
+    snapshot.resourceKindDefinitionVersions,
+    (definition) => `${definition.kindKey}@${definition.version}`,
+    'resource_kind_definition_version',
+    'version',
+    violations,
+  );
+  for (const definition of snapshot.resourceKindDefinitions) {
+    requireReference(
+      definitionVersionsByReference,
+      `${definition.key}@${definition.currentVersion}`,
+      'resource_kind_definition_parent',
+      definition.key,
+      'currentVersion',
+      'resource_kind_definition_current_version_not_found',
+      violations,
+    );
+  }
+  for (const version of snapshot.resourceKindDefinitionVersions) {
+    requireReference(
+      definitionParentsByKey,
+      version.kindKey,
+      'resource_kind_definition_version',
+      `${version.kindKey}@${version.version}`,
+      'kindKey',
+      'resource_kind_definition_parent_not_found',
+      violations,
+    );
+    if (version.createdBy !== undefined) {
+      requireReference(
+        actorsById,
+        version.createdBy,
+        'resource_kind_definition_version',
+        `${version.kindKey}@${version.version}`,
+        'createdBy',
+        'resource_kind_definition_actor_not_found',
+        violations,
+      );
+    }
+    for (const rule of version.relationshipRules) {
+      for (const targetKind of rule.targetKinds) {
+        if (targetKind === '*' || targetKind === version.kindKey) continue;
+        requireReference(
+          definitionParentsByKey,
+          targetKind,
+          'resource_kind_definition_version',
+          `${version.kindKey}@${version.version}`,
+          'relationshipRules',
+          'relationship_target_kind_not_found',
+          violations,
+        );
+      }
+    }
+  }
+
   if (
     snapshot.actors.length > 0 &&
     !snapshot.actors.some((actor) => actor.role === 'admin' && actor.active)
@@ -662,6 +847,15 @@ function validatePortableSnapshotInvariants(
     violations,
   );
   for (const profile of snapshot.profiles) {
+    requireReference(
+      definitionVersionsByReference,
+      `${profile.resourceKind}@${profile.resourceKindVersion}`,
+      'profile_parent',
+      profile.key,
+      'resourceKindVersion',
+      'profile_resource_kind_definition_not_found',
+      violations,
+    );
     if (!profileVersionsByReference.has(`${profile.key}@${profile.currentVersion}`)) {
       addViolation(
         violations,
@@ -728,6 +922,15 @@ function validatePortableSnapshotInvariants(
   }
   for (const version of snapshot.policyVersions) {
     requireReference(
+      definitionVersionsByReference,
+      `${version.resourceKind}@${version.resourceKindVersion}`,
+      'policy_version',
+      `${version.namespace}/${version.policyKey}@${version.version}`,
+      'resourceKindVersion',
+      'policy_resource_kind_definition_not_found',
+      violations,
+    );
+    requireReference(
       policyParentsByReference,
       `${version.namespace}/${version.policyKey}`,
       'policy_version',
@@ -743,6 +946,18 @@ function validatePortableSnapshotInvariants(
       `${version.namespace}/${version.policyKey}@${version.version}`,
       'createdBy',
       'policy_version_actor_not_found',
+      violations,
+    );
+  }
+
+  for (const resource of snapshot.resources) {
+    requireReference(
+      definitionVersionsByReference,
+      `${resource.kind}@${resource.kindVersion}`,
+      'resource',
+      resource.key,
+      'kindVersion',
+      'resource_kind_definition_not_found',
       violations,
     );
   }
@@ -1013,6 +1228,24 @@ function validatePortableSnapshotInvariants(
         'The operation resource key must match the referenced resource.',
         resource.resourceKey,
       );
+    }
+    if (target !== undefined) {
+      const definition = definitionVersionsByReference.get(`${target.kind}@${target.kindVersion}`);
+      if (
+        definition !== undefined &&
+        (!definition.states.includes(resource.sourceState) ||
+          !definition.states.includes(resource.targetState))
+      ) {
+        addViolation(
+          violations,
+          'operation_resource',
+          `${resource.operationId}/${resource.resourceId}`,
+          'operation_resource_state_not_defined',
+          'targetState',
+          'Operation source and target states must belong to the Resource kind definition.',
+          resource.targetState,
+        );
+      }
     }
   }
   for (const step of snapshot.operationSteps) {
@@ -1361,6 +1594,21 @@ function requireReference<T>(
   );
 }
 
+function requireDefinition(
+  definitions: Map<string, ResourceKindDefinitionVersion>,
+  key: string,
+  version: number,
+): ResourceKindDefinitionVersion {
+  const definition = definitions.get(`${key}@${version}`);
+  if (definition === undefined) {
+    throw new ValidationError(
+      'resource_kind_definition_not_found',
+      `Resource kind definition ${key}@${version} does not exist in the snapshot.`,
+    );
+  }
+  return definition;
+}
+
 function capture(
   violations: RegistryViolation[],
   entity: RegistryViolation['entity'],
@@ -1555,6 +1803,7 @@ function emptyCounts(): RegistryValidationReport['counts'] {
     policies: 0,
     bindings: 0,
     relationships: 0,
+    resourceKindDefinitions: 0,
   };
 }
 

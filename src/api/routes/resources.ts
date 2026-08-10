@@ -27,6 +27,7 @@ export function registerResourceRoutes(app: OpenAPIHono<ApiEnvironment>): void {
       actorId: actor(c).id,
       key: body.key,
       kind: body.kind,
+      kindVersion: body.kindVersion,
       name: body.name,
       placement: ensureJsonObject(body.placement, 'placement'),
       specOverrides: ensureJsonObject(body.specOverrides, 'specOverrides'),
@@ -85,8 +86,21 @@ export function registerResourceRoutes(app: OpenAPIHono<ApiEnvironment>): void {
   app.openapi(transitionResourceRoute, async (c) => {
     const { key } = c.req.valid('param');
     const body = c.req.valid('json');
+    const current = await repository(c).getResource(key);
+    if (current === null) throw new NotFoundError('Resource', key);
+    const definition = await repository(c).getResourceKindDefinition(
+      current.kind,
+      current.kindVersion,
+    );
+    if (definition === null) {
+      throw new NotFoundError('Resource kind definition', `${current.kind}@${current.kindVersion}`);
+    }
     requireOperationRole(actor(c), {
-      destructive: isDestructiveLifecycleTransition(body.targetState),
+      destructive: isDestructiveLifecycleTransition(
+        definition,
+        current.lifecycleState,
+        body.targetState,
+      ),
     });
     const resource = await new OperationService(repository(c)).transition({
       key,

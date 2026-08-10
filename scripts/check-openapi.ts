@@ -15,7 +15,6 @@ const REQUIRED_WRITE_ERRORS = ['400', '403', '409', '422'] as const;
 await checkTypeScriptContainment(rootDirectory);
 const { createApp, createOpenApiDocument } = await import('../src/api/app');
 const { operationRolePolicy } = await import('../src/api/actor-authorization');
-const { RESOURCE_LIFECYCLE_STATES } = await import('../src/domain/models/global-registry');
 
 interface OperationEntry {
   method: string;
@@ -36,7 +35,7 @@ assertConditionalOperationRoleMetadata();
 assertUniqueOperationIds();
 assertNoGenericResponseObjects();
 assertExamplesPresent();
-assertLifecycleStateEnums();
+assertLifecycleStateContracts();
 
 const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'global-registry-openapi-'));
 const documentPath = path.join(temporaryDirectory, 'openapi.json');
@@ -248,7 +247,7 @@ function assertExamplesPresent(): void {
   }
 }
 
-function assertLifecycleStateEnums(): void {
+function assertLifecycleStateContracts(): void {
   const components = asRecord(documentRecord.components, 'OpenAPI components');
   const schemas = asRecord(components.schemas, 'OpenAPI component schemas');
   for (const [schemaName, fieldName] of [
@@ -260,9 +259,10 @@ function assertLifecycleStateEnums(): void {
     const schema = asRecord(schemas[schemaName], `${schemaName} schema`);
     const properties = asRecord(schema.properties, `${schemaName} properties`);
     const property = asRecord(properties[fieldName], `${schemaName}.${fieldName}`);
+    assert(property.type === 'string', `${schemaName}.${fieldName} must be a string.`);
     assert(
-      JSON.stringify(property.enum) === JSON.stringify(RESOURCE_LIFECYCLE_STATES),
-      `${schemaName}.${fieldName} must publish the complete resource lifecycle enum.`,
+      typeof property.pattern === 'string' && property.pattern.length > 0,
+      `${schemaName}.${fieldName} must publish the extensible state identifier pattern.`,
     );
   }
 }

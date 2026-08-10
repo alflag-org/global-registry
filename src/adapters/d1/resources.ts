@@ -124,13 +124,14 @@ export class D1Resources extends D1Client {
       id: crypto.randomUUID(),
       key: input.key,
       kind: input.kind,
+      kindVersion: input.kindVersion,
       name: input.name,
       ...(input.profile === undefined ? {} : { profile: input.profile }),
       ...(input.policy === undefined ? {} : { policy: input.policy }),
       placement,
       specOverrides,
       spec,
-      lifecycleState: 'absent',
+      lifecycleState: input.initialState,
       revision: 1,
       createdAt,
       updatedAt: createdAt,
@@ -155,14 +156,16 @@ export class D1Resources extends D1Client {
       const results = await this.db.batch([
         this.statement(
           `INSERT INTO resources (
-            id, key, kind, name, profile_key, profile_version, policy_namespace, policy_key,
+            id, key, kind, kind_version, name, profile_key, profile_version,
+            policy_namespace, policy_key,
             policy_version, placement_json, spec_overrides_json, effective_spec_json,
             lifecycle_state, revision, created_at, updated_at
-          ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'absent', 1, ?, ?
+          ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
           WHERE ${guard.sql}`,
           resource.id,
           resource.key,
           resource.kind,
+          resource.kindVersion,
           resource.name,
           input.profile?.key ?? null,
           input.profile?.version ?? null,
@@ -172,6 +175,7 @@ export class D1Resources extends D1Client {
           JSON.stringify(resource.placement),
           JSON.stringify(resource.specOverrides),
           JSON.stringify(resource.spec),
+          resource.lifecycleState,
           createdAt,
           createdAt,
           ...guard.params,

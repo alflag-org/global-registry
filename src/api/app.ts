@@ -23,6 +23,7 @@ import { registerProfileRoutes } from './routes/profiles';
 import { registerProviderRoutes } from './routes/providers';
 import { registerRelationshipRoutes } from './routes/relationships';
 import { registerResourceRoutes } from './routes/resources';
+import { registerResourceKindDefinitionRoutes } from './routes/resource-kind-definitions';
 import {
   PayloadTooLargeError,
   AuthorizationError,
@@ -49,6 +50,10 @@ const openApiConfiguration = {
     { name: 'Authentication', description: 'Authenticated Access session information.' },
     { name: 'Actors', description: 'Global Registry authorization mappings.' },
     { name: 'Resources', description: 'Provider-neutral infrastructure resources.' },
+    {
+      name: 'Resource kind definitions',
+      description: 'Versioned Resource lifecycle and relationship definitions.',
+    },
     {
       name: 'Providers',
       description: 'Extensible provider drivers, capabilities, configuration, and mappings.',
@@ -117,6 +122,7 @@ export function createApp(): OpenAPIHono<ApiEnvironment> {
   registerAuthRoutes(app);
   registerActorRoutes(app);
   registerResourceRoutes(app);
+  registerResourceKindDefinitionRoutes(app);
   registerProviderRoutes(app);
   registerProfileRoutes(app);
   registerPolicyRoutes(app);

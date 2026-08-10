@@ -113,7 +113,7 @@ export const removeBindingRoute = createRoute({
   tags: ['Bindings'],
   summary: 'Remove a provider binding',
   description:
-    'Removes a binding only from a retired resource under the planned destructive operation and valid fencing token. Requires operator.',
+    'Removes a binding only from a Resource in a terminal lifecycle state under the planned destructive operation and valid fencing token. Requires operator.',
   ...protectedRouteMetadata('operator'),
   request: {
     params: bindingResourceParamsSchema,

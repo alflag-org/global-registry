@@ -3,10 +3,7 @@ import {
   NotFoundError,
   ValidationError,
 } from '../domain/errors/global-registry-error';
-import {
-  isDestructiveLifecycleTransition,
-  validateLifecycleTransition,
-} from '../domain/lifecycle/lifecycle';
+import { validateLifecycleTransition } from '../domain/lifecycle/lifecycle';
 import { ensureJsonObject } from '../domain/models/json';
 import type {
   JsonObject,
@@ -16,6 +13,7 @@ import type {
   OperationStep,
   OperationStepPlan,
   Resource,
+  ResourceKindDefinitionVersion,
   ResourceLifecycleState,
 } from '../domain/models/global-registry';
 import type { OperationChange } from '../domain/operation/model';
@@ -111,6 +109,10 @@ export interface ChangeOperationStepCommand {
 
 interface OperationStore {
   getResource(key: string): Promise<Resource | null>;
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
   getOperation(id: string): Promise<Operation | null>;
   getOperationDetail(id: string): Promise<OperationDetail | null>;
   createOperation(input: PersistOperationCommand): Promise<Operation>;
@@ -168,6 +170,7 @@ export class OperationService {
     const changes = validateOperationChanges(input.changes);
     const resourceKeys = new Set<string>();
     const resources: PersistOperationResource[] = [];
+    let lifecycleDestructive = false;
     for (const planned of input.resources) {
       if (resourceKeys.has(planned.resourceKey)) {
         throw new ValidationError(
@@ -195,7 +198,13 @@ export class OperationService {
         );
       }
       if (planned.sourceState !== planned.targetState) {
-        validateLifecycleTransition(resource.kind, planned.sourceState, planned.targetState);
+        const definition = await this.loadDefinition(resource);
+        const transition = validateLifecycleTransition(
+          definition,
+          planned.sourceState,
+          planned.targetState,
+        );
+        lifecycleDestructive ||= transition.destructive;
       }
       resources.push({ ...planned, resourceId: resource.id });
     }
@@ -239,9 +248,7 @@ export class OperationService {
       resolvedChanges.push({ change, position, resourceId, targetResourceId });
     }
 
-    const destructive =
-      input.destructive ||
-      resources.some(({ targetState }) => isDestructiveLifecycleTransition(targetState));
+    const destructive = input.destructive || lifecycleDestructive;
     const plan = ensureJsonObject(
       {
         kind: input.kind,
@@ -402,7 +409,8 @@ export class OperationService {
         currentRevision: resource.revision,
       });
     }
-    validateLifecycleTransition(resource.kind, resource.lifecycleState, input.targetState);
+    const definition = await this.loadDefinition(resource);
+    validateLifecycleTransition(definition, resource.lifecycleState, input.targetState);
     const detail = await this.store.getOperationDetail(input.operationId);
     if (detail === null) throw new NotFoundError('Operation', input.operationId);
     if (detail.operation.status !== 'running') {
@@ -526,5 +534,19 @@ export class OperationService {
     const operation = await this.store.getOperation(id);
     if (operation === null) throw new NotFoundError('Operation', id);
     return operation;
+  }
+
+  private async loadDefinition(resource: Resource): Promise<ResourceKindDefinitionVersion> {
+    const definition = await this.store.getResourceKindDefinition(
+      resource.kind,
+      resource.kindVersion,
+    );
+    if (definition === null) {
+      throw new NotFoundError(
+        'Resource kind definition',
+        `${resource.kind}@${resource.kindVersion}`,
+      );
+    }
+    return definition;
   }
 }

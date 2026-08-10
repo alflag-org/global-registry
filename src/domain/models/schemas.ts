@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import { actorCreateInputSchema } from '../actor/schemas';
-import { policyDefinitionSchema } from '../policy/schemas';
 import { providerDefinitionSchema } from '../provider/schemas';
+import { placementSchema } from '../resource/schemas';
 import {
-  placementSchema,
+  resourceKindDefinitionInputSchema,
+  resourceKindRelationshipRuleSchema,
   resourceKindSchema,
-  resourceSpecOverrideSchemas,
-  resourceSpecSchemas,
-} from '../resource/schemas';
+  resourceLifecycleStateSchema,
+  resourceLifecycleTransitionSchema,
+} from '../resource-kind/schemas';
 import {
   DRIFT_SEVERITIES,
   DRIFT_STATUSES,
@@ -16,7 +17,7 @@ import {
   OPERATION_STATUSES,
   OPERATION_STEP_STATUSES,
   RELATIONSHIP_TYPES,
-  RESOURCE_LIFECYCLE_STATES,
+  RESOURCE_SPECIFICATION_MODES,
   VERSION_PARENT_STATUSES,
 } from './global-registry';
 import { isBoundedJsonObject, isBoundedJsonValue } from './json';
@@ -32,7 +33,7 @@ export const revisionSchema = z.number().int().positive();
 export const nonnegativeRevisionSchema = z.number().int().nonnegative();
 export const timestampSchema = z.string().datetime();
 export { resourceKindSchema };
-export const resourceLifecycleStateSchema = z.enum(RESOURCE_LIFECYCLE_STATES);
+export { resourceLifecycleStateSchema };
 export const healthStatusSchema = z.enum(HEALTH_STATUSES);
 export const driftStatusSchema = z.enum(DRIFT_STATUSES);
 export const operationStatusSchema = z.enum(OPERATION_STATUSES);
@@ -63,33 +64,16 @@ export const policyReferenceSchema = z
   })
   .strict();
 
-export const resourceSpecSchema = z.union([
-  resourceSpecSchemas.location,
-  resourceSpecSchemas.network,
-  resourceSpecSchemas.compute,
-  resourceSpecSchemas.volume,
-  resourceSpecSchemas.service_cluster,
-  resourceSpecSchemas.service_instance,
-  resourceSpecSchemas.endpoint,
-  resourceSpecSchemas.backup_repository,
-]);
+export const resourceSpecSchema = jsonObjectSchema;
 
-export const resourceSpecOverridesSchema = z.union([
-  resourceSpecOverrideSchemas.location,
-  resourceSpecOverrideSchemas.network,
-  resourceSpecOverrideSchemas.compute,
-  resourceSpecOverrideSchemas.volume,
-  resourceSpecOverrideSchemas.service_cluster,
-  resourceSpecOverrideSchemas.service_instance,
-  resourceSpecOverrideSchemas.endpoint,
-  resourceSpecOverrideSchemas.backup_repository,
-]);
+export const resourceSpecOverridesSchema = jsonObjectSchema;
 
 export const resourceRecordSchema = z
   .object({
     id: identifierSchema,
     key: keySchema,
     kind: resourceKindSchema,
+    kindVersion: revisionSchema,
     name: z.string().min(1).max(256),
     profile: versionedReferenceSchema.optional(),
     policy: policyReferenceSchema.optional(),
@@ -119,6 +103,7 @@ export const profileVersionRecordSchema = z
     key: keySchema,
     version: revisionSchema,
     resourceKind: resourceKindSchema,
+    resourceKindVersion: revisionSchema,
     spec: profileSpecSchema,
     parentStatus: versionParentStatusSchema,
     revision: revisionSchema,
@@ -126,12 +111,7 @@ export const profileVersionRecordSchema = z
   })
   .strict();
 
-export const policySpecSchema = z.union(
-  policyDefinitionSchema.options.map((option) => option.shape.spec) as [
-    (typeof policyDefinitionSchema.options)[number]['shape']['spec'],
-    (typeof policyDefinitionSchema.options)[number]['shape']['spec'],
-  ],
-);
+export const policySpecSchema = jsonObjectSchema;
 
 export const policyVersionRecordSchema = z
   .object({
@@ -139,10 +119,24 @@ export const policyVersionRecordSchema = z
     key: keySchema,
     version: revisionSchema,
     resourceKind: resourceKindSchema,
+    resourceKindVersion: revisionSchema,
     spec: policySpecSchema,
     parentStatus: versionParentStatusSchema,
     revision: revisionSchema,
     createdAt: timestampSchema,
+  })
+  .strict();
+
+export const resourceKindDefinitionVersionRecordSchema = resourceKindDefinitionInputSchema
+  .extend({
+    version: revisionSchema,
+    specificationMode: z.enum(RESOURCE_SPECIFICATION_MODES),
+    parentStatus: versionParentStatusSchema,
+    revision: revisionSchema,
+    createdAt: timestampSchema,
+    createdBy: identifierSchema.optional(),
+    transitions: z.array(resourceLifecycleTransitionSchema),
+    relationshipRules: z.array(resourceKindRelationshipRuleSchema),
   })
   .strict();
 

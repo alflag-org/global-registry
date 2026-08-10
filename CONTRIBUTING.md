@@ -31,6 +31,8 @@ Provider credential values must not appear in source, fixtures, logs, exports, i
 
 Provider drivers and feature capabilities are extensible identifiers. Do not add a Core enum or provider-specific configuration, mapping, or provider resource type schema when adding an adapter. Keep that validation in the external adapter; Core validates only the generic provider contract and Registry compatibility rules.
 
+Resource kinds and lifecycle states are versioned definitions, not Core enums. Preserve strict schemas for the standard kinds. Add an extension kind through the definition API and keep its provider-specific semantic validation in the external adapter. Resources, profiles, and policies must reference an exact definition version.
+
 ## Verification
 
 ```sh

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { providerCapabilitySchema } from '../provider/schemas';
+import { resourceKindSchema } from '../resource-kind/schemas';
+import { isBoundedJsonObject } from '../models/json';
 import { hasUniqueValues } from '../unique-values';
 import {
   ADDRESS_FAMILIES,
@@ -43,6 +45,8 @@ const commonFields = {
   allowedZones: uniqueArray(stableKeySchema).optional(),
   requiredProviderCapabilities: uniqueArray(providerCapabilitySchema).optional(),
 };
+
+export const commonPolicySpecSchema = nonEmptyConstraint(commonFields);
 
 function nonEmptyConstraint<T extends z.ZodRawShape>(shape: T) {
   return z
@@ -102,69 +106,14 @@ export const policySpecSchemas = {
   }),
 } as const;
 
-export const policyDefinitionSchema = z.discriminatedUnion('resourceKind', [
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('location'),
-      spec: policySpecSchemas.location,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('network'),
-      spec: policySpecSchemas.network,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('compute'),
-      spec: policySpecSchemas.compute,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('volume'),
-      spec: policySpecSchemas.volume,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('service_cluster'),
-      spec: policySpecSchemas.service_cluster,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('service_instance'),
-      spec: policySpecSchemas.service_instance,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('endpoint'),
-      spec: policySpecSchemas.endpoint,
-    })
-    .strict(),
-  z
-    .object({
-      namespace: stableKeySchema,
-      key: stableKeySchema,
-      resourceKind: z.literal('backup_repository'),
-      spec: policySpecSchemas.backup_repository,
-    })
-    .strict(),
-]);
+export const policyDefinitionSchema = z
+  .object({
+    namespace: stableKeySchema,
+    key: stableKeySchema,
+    resourceKind: resourceKindSchema,
+    resourceKindVersion: z.number().int().positive(),
+    spec: z.custom<Record<string, unknown>>((value) => isBoundedJsonObject(value), {
+      message: 'Policy spec must be a bounded JSON object.',
+    }),
+  })
+  .strict();

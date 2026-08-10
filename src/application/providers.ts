@@ -10,6 +10,7 @@ import type {
   Provider,
   ProviderBinding,
   Resource,
+  ResourceKindDefinitionVersion,
 } from '../domain/models/global-registry';
 import { evaluatePolicy } from '../domain/policy/evaluator';
 import { evaluateProviderCompatibility } from '../domain/provider/compatibility';
@@ -55,6 +56,10 @@ interface ProviderStore {
     nextCursor?: string;
   }>;
   getPolicyVersion(namespace: string, key: string, version: number): Promise<PolicyVersion | null>;
+  getResourceKindDefinition(
+    key: string,
+    version: number,
+  ): Promise<ResourceKindDefinitionVersion | null>;
 }
 
 interface CreateProviderCommand {
@@ -163,9 +168,20 @@ export class ProviderService {
     }
 
     for (const { binding, resource } of activeBindings) {
+      const definition = await this.store.getResourceKindDefinition(
+        resource.kind,
+        resource.kindVersion,
+      );
+      if (definition === null) {
+        throw new NotFoundError(
+          'Resource kind definition',
+          `${resource.kind}@${resource.kindVersion}`,
+        );
+      }
       const compatibility = evaluateProviderCompatibility({
         resource,
         provider: candidate,
+        definition,
         requireActive: false,
       });
       if (!compatibility.valid) {
@@ -187,7 +203,13 @@ export class ProviderService {
             `${resource.policy.namespace}/${resource.policy.key}@${resource.policy.version}`,
           );
         }
-        const evaluation = evaluatePolicy({ resource, policy, provider: candidate, binding });
+        const evaluation = evaluatePolicy({
+          resource,
+          policy,
+          definition,
+          provider: candidate,
+          binding,
+        });
         if (!evaluation.valid) {
           throw new ValidationError(
             'policy_violation',
