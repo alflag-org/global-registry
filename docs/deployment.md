@@ -35,7 +35,7 @@ Before applying a remote migration, confirm the dry-run bundle and target accoun
 
 After the migration and deployment:
 
-1. If the database has no Actor, insert the first active admin through the D1 operator console using `access:<sub>` or `service:<common_name>` as the Actor identity and the same Actor ID in `created_by` and `updated_by`.
+1. Create the first active admin with `mise run bootstrap-admin -- --remote --database DB --config wrangler.operator.jsonc --identity access:<sub> --display-name "Registry Administrator"`. Use `service:<common_name>` for a service identity.
 2. Confirm Cloudflare Access protects the registry API, `/healthz`, `/openapi.json`, `/docs`, and the main UI.
 3. Confirm the active `BACKUP_ACTOR_ID` can run scheduled maintenance.
 4. Exercise the deployed Access session and cookie policy, D1 concurrency, and Queue/R2 partial-failure recovery.

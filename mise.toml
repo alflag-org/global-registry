@@ -29,6 +29,10 @@ run = "pnpm db:migrate:local"
 description = "Apply D1 migrations to the configured remote database"
 run = "pnpm db:migrate:remote"
 
+[tasks.bootstrap-admin]
+description = "Create the first active admin Actor in D1"
+run = "pnpm bootstrap:admin"
+
 [tasks.smoke]
 description = "Validate a fresh local D1 database"
 run = "pnpm smoke:local"

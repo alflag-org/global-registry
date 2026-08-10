@@ -40,6 +40,7 @@
     "browser:install": "playwright install chromium",
     "db:migrate:local": "node scripts/check-typescript-containment.mjs && wrangler d1 migrations apply DB --local --env development --config wrangler.jsonc",
     "db:migrate:remote": "pnpm deploy:preflight && node scripts/check-typescript-containment.mjs && wrangler d1 migrations apply DB --remote --config wrangler.operator.jsonc",
+    "bootstrap:admin": "node scripts/check-typescript-containment.mjs && tsx scripts/bootstrap-admin.ts",
     "export:sql": "node scripts/check-typescript-containment.mjs && tsx scripts/export.ts",
     "validate:sql-export": "node scripts/check-typescript-containment.mjs && tsx scripts/validate-export.ts"
   },
