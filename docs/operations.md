@@ -2,13 +2,15 @@
 
 ## Access and Actor administration
 
-Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Create it through the D1 operator console after the single migration has been applied. Use `access:<sub>` for a human identity or `service:<common_name>` for a service identity.
+Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Create it through the D1 operator console after the pending migrations have been applied. Use `access:<sub>` for a human identity or `service:<common_name>` for a service identity.
 
 Actor identity and creation metadata are immutable. Role and active-state changes require the expected revision, are audited, and cannot remove the final active admin or lock out the updating admin. Use the API or UI for normal Actor changes; the first-admin insert is the bootstrap exception. Local authentication procedures and their loopback boundary are in [SECURITY.md](../SECURITY.md).
 
 ## Migration and recovery
 
-The schema has one migration: [`migrations/0001_initial.sql`](../migrations/0001_initial.sql). Apply it locally with `mise run migrate-local` or `pnpm db:migrate:local`, and verify it with `pnpm check:migrations`. Do not bypass application invariants with ordinary direct SQL writes.
+The schema uses the forward-only SQL files in [`migrations/`](../migrations). `0001_initial.sql` is frozen. Apply pending files locally with `mise run migrate-local` or `pnpm db:migrate:local`, and verify both fresh and existing-database paths with `pnpm check:migrations`. Wrangler and D1 track applied files; the application has no separate migration ledger.
+
+Back up and validate the database before applying pending files remotely. Keep each migration compatible with the deployed Worker. For a destructive change, expand first, deploy compatible code, migrate data in bounded work, and contract in a later release. Do not bypass application invariants with ordinary direct SQL writes.
 
 There is no portable JSON import, seed, or legacy-restoration interface. Recovery uses a validated raw D1 SQL export and Cloudflare D1 operator recovery facilities within their supported boundary. Reconnect provider credential references through the external secret system; never restore credential values into the registry.
 
