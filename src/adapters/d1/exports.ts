@@ -313,9 +313,9 @@ export class D1Exports extends D1Client {
           leaseUntil,
           recovery,
           revision: nextRevision,
+          schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
           objectKey,
           claimToken,
-          schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
         },
       },
       {

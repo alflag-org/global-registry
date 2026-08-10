@@ -66,6 +66,7 @@ function snapshot(): RegistrySnapshot {
       features: ['compute.vm'],
       architectures: ['amd64'],
     },
+    configuration: { region: 'primary' },
     mappings: {
       networks: { dmz: { bridge: 'vmbr0', vlanTag: 130 } },
       storageClasses: { general: { storage: 'local-lvm' } },

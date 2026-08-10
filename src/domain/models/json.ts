@@ -43,6 +43,34 @@ export function ensureJsonObject(value: unknown, field: string): JsonObject {
   return normalizeJsonObject(value, field);
 }
 
+/** Rejects credential-like fields in JSON that is intentionally opaque to Core. */
+export function ensureCredentialFreeJsonObject(value: unknown, field: string): JsonObject {
+  const normalized = ensureJsonObject(value, field);
+  const pending: JsonValue[] = [normalized];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined || current === null || typeof current !== 'object') continue;
+    if (Array.isArray(current)) {
+      pending.push(...current);
+      continue;
+    }
+    for (const [key, nested] of Object.entries(current)) {
+      const compact = key.replaceAll(/[^a-z0-9]/gi, '').toLowerCase();
+      if (
+        compact.includes('credential') ||
+        SECRET_KEY_PARTS.some((part) => compact.includes(part))
+      ) {
+        throw new ValidationError(
+          'secret_like_json_key',
+          `${field} must not contain credential or secret fields.`,
+        );
+      }
+      pending.push(nested);
+    }
+  }
+  return normalized;
+}
+
 /**
  * Applies explicit resource values over profile defaults without sharing mutable
  * references with either input. Objects merge recursively; arrays are replaced.

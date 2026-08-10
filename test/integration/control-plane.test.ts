@@ -993,13 +993,14 @@ describe.sequential('control-plane API', () => {
       method: 'POST',
       body: JSON.stringify({
         id: 'provider-primary',
-        driver: 'proxmox',
+        driver: 'example.internal',
         credentialRef: 'TEST_PROVIDER_TOKEN',
         capabilities: {
           resourceKinds: ['compute'],
-          features: ['compute.vm', 'cloud-init'],
+          features: ['compute.vm', 'compute.cloud-init'],
           architectures: ['amd64'],
         },
+        configuration: { region: 'primary', adapterMode: 'managed' },
         mappings: {
           networks: {
             dmz: { bridge: 'vmbr0', vlanTag: 130 },
@@ -1011,6 +1012,10 @@ describe.sequential('control-plane API', () => {
       }),
     });
     expect(provider.status).toBe(201);
+    expect(asRecord(await provider.json())).toMatchObject({
+      driver: 'example.internal',
+      configuration: { region: 'primary', adapterMode: 'managed' },
+    });
 
     const policy = await request('access:test-admin', '/api/v1/policies', {
       method: 'POST',
@@ -1035,7 +1040,7 @@ describe.sequential('control-plane API', () => {
           locationKey: 'site-01',
           zone: 'dmz',
           providerSelector: {
-            drivers: ['proxmox'],
+            drivers: ['example.internal'],
             providerIds: ['provider-primary'],
             requiredCapabilities: ['compute.vm'],
           },
@@ -1356,22 +1361,18 @@ describe.sequential('control-plane API', () => {
     );
     expect(acknowledged.status).toBe(200);
 
-    const incompatibleProviderPatch = await request(
+    const secretConfigurationPatch = await request(
       'access:test-admin',
       '/api/v1/providers/provider-primary',
       {
         method: 'PATCH',
         body: JSON.stringify({
-          mappings: {
-            networks: {},
-            storageClasses: { general: { storage: 'local-lvm' } },
-            imageClasses: { 'ubuntu-2404': { templateId: '9000' } },
-          },
+          configuration: { apiToken: 'must-not-be-stored' },
           expectedRevision: 1,
         }),
       },
     );
-    expect(incompatibleProviderPatch.status).toBe(422);
+    expect(secretConfigurationPatch.status).toBe(422);
 
     const incompatibleCapabilityPatch = await request(
       'access:test-admin',

@@ -86,7 +86,7 @@ export class BindingService {
       boundAt: new Date(0).toISOString(),
       boundBy: input.actorId,
     };
-    const compatibility = evaluateProviderCompatibility({ resource, provider, binding });
+    const compatibility = evaluateProviderCompatibility({ resource, provider });
     if (!compatibility.valid) {
       throw new ValidationError(
         'provider_incompatible',

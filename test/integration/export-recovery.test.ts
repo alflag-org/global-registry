@@ -256,6 +256,19 @@ describe.sequential('D1 export recovery', () => {
       .run();
   });
 
+  it('uses the current portable schema when claiming an older pending export', async () => {
+    const repository = new D1GlobalRegistryRepository(env.DB);
+    const exportRecord = await repository.createExport(actorId);
+    await env.DB.prepare(`UPDATE exports SET schema_version = '1.1' WHERE id = ?`)
+      .bind(exportRecord.id)
+      .run();
+
+    expect(await repository.claimExport(exportRecord.id, claimedAt)).not.toBeNull();
+    expect((await repository.getExport(exportRecord.id))?.schemaVersion).toBe(
+      PORTABLE_EXPORT_SCHEMA_VERSION,
+    );
+  });
+
   it('claims an expired max-attempt lease as non-incrementing recovery', async () => {
     const repository = new D1GlobalRegistryRepository(env.DB);
     const exportId = await seedRunningAtLimit(repository);

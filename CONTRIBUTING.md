@@ -29,6 +29,8 @@ Route schemas are the source for the runtime-generated OpenAPI document. Do not 
 
 Provider credential values must not appear in source, fixtures, logs, exports, issues, or documentation. Use uppercase credential references only. Authoritative resources and operations are not hard-deleted; use the lifecycle or status transitions provided by the API.
 
+Provider drivers and feature capabilities are extensible identifiers. Do not add a Core enum or provider-specific configuration, mapping, or provider resource type schema when adding an adapter. Keep that validation in the external adapter; Core validates only the generic provider contract and Registry compatibility rules.
+
 ## Verification
 
 ```sh

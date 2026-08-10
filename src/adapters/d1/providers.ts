@@ -5,7 +5,7 @@ import type {
   ProviderBinding,
   Resource,
 } from '../../domain/models/global-registry';
-import { ensureJsonObject } from '../../domain/models/json';
+import { ensureCredentialFreeJsonObject, ensureJsonObject } from '../../domain/models/json';
 import { boundedPageLimit } from '../../domain/models/pagination';
 import { D1Client, type SqlValue } from './client';
 import { mapBinding, mapProvider, mapResource } from './rows';
@@ -18,6 +18,7 @@ export interface CreateProviderInput {
   credentialRef: string;
   status: Provider['status'];
   capabilities: JsonObject;
+  configuration: JsonObject;
   mappings: JsonObject;
   actorId: string;
 }
@@ -32,6 +33,7 @@ export interface UpdateProviderInput {
   credentialRef?: string;
   status?: Provider['status'];
   capabilities?: JsonObject;
+  configuration?: JsonObject;
   mappings?: JsonObject;
   expectedBoundResources: Array<{
     id: string;
@@ -96,13 +98,18 @@ export class D1Providers extends D1Client {
   async create(input: CreateProviderInput): Promise<Provider> {
     const createdAt = new Date().toISOString();
     const capabilities = ensureJsonObject(input.capabilities, 'provider capabilities');
-    const mappings = ensureJsonObject(input.mappings, 'provider mappings');
+    const configuration = ensureCredentialFreeJsonObject(
+      input.configuration,
+      'provider configuration',
+    );
+    const mappings = ensureCredentialFreeJsonObject(input.mappings, 'provider mappings');
     const provider: Provider = {
       id: input.id,
       driver: input.driver,
       credentialRef: input.credentialRef,
       status: input.status,
       capabilities,
+      configuration,
       mappings,
       bindingRevision: 0,
       revision: 1,
@@ -118,14 +125,15 @@ export class D1Providers extends D1Client {
       await this.db.batch([
         this.statement(
           `INSERT INTO providers (
-            id, driver, credential_ref, status, capabilities_json, mappings_json,
+            id, driver, credential_ref, status, capabilities_json, configuration_json, mappings_json,
             revision, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
           provider.id,
           provider.driver,
           provider.credentialRef,
           provider.status,
           JSON.stringify(capabilities),
+          JSON.stringify(configuration),
           JSON.stringify(mappings),
           createdAt,
           createdAt,
@@ -163,9 +171,19 @@ export class D1Providers extends D1Client {
       assignments.push('capabilities_json = ?');
       params.push(JSON.stringify(ensureJsonObject(input.capabilities, 'provider capabilities')));
     }
+    if (input.configuration !== undefined) {
+      assignments.push('configuration_json = ?');
+      params.push(
+        JSON.stringify(
+          ensureCredentialFreeJsonObject(input.configuration, 'provider configuration'),
+        ),
+      );
+    }
     if (input.mappings !== undefined) {
       assignments.push('mappings_json = ?');
-      params.push(JSON.stringify(ensureJsonObject(input.mappings, 'provider mappings')));
+      params.push(
+        JSON.stringify(ensureCredentialFreeJsonObject(input.mappings, 'provider mappings')),
+      );
     }
     if (assignments.length === 2) {
       throw new Error('Provider persistence command must contain a mutable field.');

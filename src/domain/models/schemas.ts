@@ -103,23 +103,14 @@ export const resourceRecordSchema = z
   })
   .strict();
 
-function providerRecordVariant<const Index extends 0 | 1 | 2 | 3>(index: Index) {
-  return providerDefinitionSchema.options[index]
-    .extend({
-      bindingRevision: nonnegativeRevisionSchema,
-      revision: revisionSchema,
-      createdAt: timestampSchema,
-      updatedAt: timestampSchema,
-    })
-    .strict();
-}
-
-export const providerRecordSchema = z.discriminatedUnion('driver', [
-  providerRecordVariant(0),
-  providerRecordVariant(1),
-  providerRecordVariant(2),
-  providerRecordVariant(3),
-]);
+export const providerRecordSchema = providerDefinitionSchema
+  .extend({
+    bindingRevision: nonnegativeRevisionSchema,
+    revision: revisionSchema,
+    createdAt: timestampSchema,
+    updatedAt: timestampSchema,
+  })
+  .strict();
 
 export const profileSpecSchema = resourceSpecOverridesSchema;
 

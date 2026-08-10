@@ -261,7 +261,6 @@ export class ResourceService {
     const compatibility = evaluateProviderCompatibility({
       resource,
       provider,
-      binding,
       requireActive: false,
     });
     if (!compatibility.valid) {

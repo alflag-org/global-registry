@@ -158,7 +158,7 @@ try {
     requireColumns(database, {
       actors: ['created_by', 'updated_by'],
       resources: ['spec_overrides_json', 'effective_spec_json'],
-      providers: ['status', 'binding_revision'],
+      providers: ['status', 'binding_revision', 'configuration_json'],
       profiles: ['status'],
       policies: ['status'],
       policy_versions: ['resource_kind'],
@@ -498,6 +498,10 @@ function readSnapshot(database: DatabaseSync): unknown {
       capabilities: parseJson(
         row.capabilities_json,
         `providers.${String(row.id)}.capabilities_json`,
+      ),
+      configuration: parseJson(
+        row.configuration_json,
+        `providers.${String(row.id)}.configuration_json`,
       ),
       mappings: parseJson(row.mappings_json, `providers.${String(row.id)}.mappings_json`),
       bindingRevision: row.binding_revision,
