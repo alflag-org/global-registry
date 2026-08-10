@@ -26,7 +26,7 @@
     "check:validate-export": "node scripts/check-typescript-containment.mjs && node scripts/validate-export-regressions.mjs",
     "check:domain-boundary": "node scripts/check-typescript-containment.mjs && node scripts/check-domain-boundary.mjs && node scripts/check-domain-boundary-regressions.mjs",
     "check:test-classification": "node scripts/check-typescript-containment.mjs && node scripts/check-test-classification.mjs && node scripts/check-test-classification-regressions.mjs",
-    "check:migrations": "node scripts/check-typescript-containment.mjs && tsx scripts/check-migrations.ts",
+    "check:migrations": "node scripts/check-typescript-containment.mjs && tsx scripts/check-migrations.ts && tsx scripts/check-migrations-regressions.ts",
     "check:openapi": "node scripts/check-typescript-containment.mjs && tsx scripts/check-openapi.ts",
     "lint": "node scripts/check-typescript-containment.mjs && eslint src test scripts",
     "format:check": "node scripts/check-typescript-containment.mjs && prettier --check .",

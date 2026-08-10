@@ -27,7 +27,7 @@ mise run migrate-local
 mise run dev
 ```
 
-After applying the migration, create the first active admin through the local D1 SQL console with an `access:<subject>` or `service:<common_name>` identity, using the same Actor ID in `created_by` and `updated_by`. The repository has no seed or import command.
+After applying the pending migrations, create the first active admin through the local D1 SQL console with an `access:<subject>` or `service:<common_name>` identity, using the same Actor ID in `created_by` and `updated_by`. The repository has no seed or import command.
 
 ## Verification
 
@@ -38,7 +38,7 @@ mise run smoke
 pnpm check:local-auth
 ```
 
-`mise run check` runs the static checks and test suites. `mise run smoke` validates a fresh local D1 database. The focused local-auth check requires the locked Playwright browser.
+`mise run check` runs the static checks and test suites, including fresh-database and existing-database migration paths. `mise run smoke` applies all migrations to a fresh local D1 database. The focused local-auth check requires the locked Playwright browser.
 
 ## Further reading
 

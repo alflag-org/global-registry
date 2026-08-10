@@ -2,13 +2,15 @@
 
 ## Access and Actor administration
 
-Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Create it through the D1 operator console after the single migration has been applied. Use `access:<sub>` for a human identity or `service:<common_name>` for a service identity.
+Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Create it through the D1 operator console after the pending migrations have been applied. Use `access:<sub>` for a human identity or `service:<common_name>` for a service identity.
 
 Actor identity and creation metadata are immutable. Role and active-state changes require the expected revision, are audited, and cannot remove the final active admin or lock out the updating admin. Use the API or UI for normal Actor changes; the first-admin insert is the bootstrap exception. Local authentication procedures and their loopback boundary are in [SECURITY.md](../SECURITY.md).
 
 ## Migration and recovery
 
-The schema has one migration: [`migrations/0001_initial.sql`](../migrations/0001_initial.sql). Apply it locally with `mise run migrate-local` or `pnpm db:migrate:local`, and verify it with `pnpm check:migrations`. Do not bypass application invariants with ordinary direct SQL writes.
+The schema uses the forward-only SQL files in [`migrations/`](../migrations). `0001_initial.sql` is frozen. Apply pending files locally with `mise run migrate-local` or `pnpm db:migrate:local`, and verify both fresh and existing-database paths with `pnpm check:migrations`. Wrangler and D1 track applied files; the application has no separate migration ledger.
+
+Back up and validate the database before applying pending files remotely. Keep each migration compatible with the deployed Worker. For a destructive change, expand first, deploy compatible code, migrate data in bounded work, and contract in a later release. Do not bypass application invariants with ordinary direct SQL writes.
 
 There is no portable JSON import, seed, or legacy-restoration interface. Recovery uses a validated raw D1 SQL export and Cloudflare D1 operator recovery facilities within their supported boundary. Reconnect provider credential references through the external secret system; never restore credential values into the registry.
 
@@ -47,6 +49,8 @@ Validation rejects malformed, unsupported, or filesystem-capable SQL and checks 
 Outbox delivery is at-least-once. A dispatcher leases at most 100 pending rows and sends each Queue message with its dispatch token. Producer sends have at most three attempts total: the initial attempt plus at most two retries. The third failure terminalizes the D1 outbox row without consuming consumer deliveries. Consumer claim, completion, and release require the current token. Duplicate or stale deliveries are acknowledged. A busy or failed current claim is retried. The operator template allows five Queue retries after the initial delivery and uses a five-minute visibility lease; persistent failures follow the configured dead-letter policy.
 
 Operation lock scopes are planned `resource/<key>` values. The operation creator and Actor own the lease. The lease must be current and must carry a fencing token. Fencing generations remain after release and advance on grant, renewal, expiry recovery, or reacquisition. A delayed token cannot mutate state after a newer lease. Validate real D1 concurrency in the deployed environment.
+
+Complete an operation with `POST /api/v1/operations/{id}/complete` only after all planned resources have reached their target lifecycle and all steps are `succeeded` or `skipped`. Planned binding replacements must match the current binding, planned removals must be absent, and planned relationship creates or removals must match current D1 state. The endpoint returns `operation_completion_incomplete` without changing the operation or writing a success event when any condition is unmet.
 
 ## Routine verification
 

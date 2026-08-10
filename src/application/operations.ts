@@ -89,6 +89,14 @@ export interface ChangeOperationStatusCommand {
   actorId: string;
 }
 
+export interface CompleteOperationCommand {
+  id: string;
+  expectedRevision: number;
+  lockScope: string;
+  fencingToken: number;
+  actorId: string;
+}
+
 export interface ChangeOperationStepCommand {
   operationId: string;
   stepId: string;
@@ -120,6 +128,7 @@ interface OperationStore {
   }): Promise<LockLease[]>;
   releaseLocks(input: { operationId: string; scopes: string[]; actorId: string }): Promise<void>;
   transition(input: TransitionResourceCommand): Promise<Resource>;
+  completeOperation(input: CompleteOperationCommand): Promise<Operation>;
   updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation>;
   updateOperationStep(input: ChangeOperationStepCommand): Promise<OperationStep>;
 }
@@ -127,7 +136,7 @@ interface OperationStore {
 const OPERATION_STATUS_TRANSITIONS: Readonly<Record<OperationStatus, readonly OperationStatus[]>> =
   {
     planned: ['running', 'cancelled'],
-    running: ['succeeded', 'failed', 'blocked', 'cancelled'],
+    running: ['failed', 'blocked', 'cancelled'],
     blocked: ['running', 'failed', 'cancelled'],
     succeeded: [],
     failed: [],
@@ -451,6 +460,25 @@ export class OperationService {
       ...input,
       sourceStatus: operation.status,
     });
+  }
+
+  async complete(input: CompleteOperationCommand): Promise<Operation> {
+    const operation = await this.loadOperation(input.id);
+    if (operation.revision !== input.expectedRevision) {
+      throw new ConflictError('revision_conflict', 'Operation revision is stale.', {
+        id: input.id,
+        expectedRevision: input.expectedRevision,
+        currentRevision: operation.revision,
+      });
+    }
+    if (operation.status !== 'running') {
+      throw new ConflictError(
+        'operation_status_conflict',
+        'Only a running operation can be completed.',
+        { from: operation.status, to: 'succeeded' },
+      );
+    }
+    return this.store.completeOperation(input);
   }
 
   async updateStep(input: {

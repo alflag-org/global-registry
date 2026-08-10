@@ -27,15 +27,15 @@ pnpm db:migrate:remote
 pnpm deploy
 ```
 
-`pnpm deploy:preflight` validates the operator configuration, binding names, production authentication settings, disabled public exposure, required resource identifiers, Queue recovery settings, and Cron Trigger. `pnpm deploy:dry-run` builds the Worker without publishing it. `pnpm db:migrate:remote` applies `migrations/0001_initial.sql` to the configured D1 database. `pnpm deploy` publishes the Worker after running its preflight guard again.
+`pnpm deploy:preflight` validates the operator configuration, binding names, production authentication settings, disabled public exposure, required resource identifiers, Queue recovery settings, and Cron Trigger. `pnpm deploy:dry-run` builds the Worker without publishing it. `pnpm db:migrate:remote` applies every pending file in `migrations/` through the Wrangler/D1 migration ledger. `pnpm deploy` publishes the Worker after running its preflight guard again.
 
-Before the migration, confirm the dry-run bundle and target account. Do not use direct unguarded Wrangler commands for the remote migration or deployment.
+Before applying a remote migration, confirm the dry-run bundle and target account, create a raw D1 SQL export, and validate that export. The command order above is for additive migrations compatible with the deployed Worker. Split a destructive schema change across releases: expand the schema, deploy compatible code, migrate data in bounded work, then contract the schema only after the old Worker shape is no longer in use. Do not use direct unguarded Wrangler commands for the remote migration or deployment.
 
 ## Operator acceptance
 
 After the migration and deployment:
 
-1. Insert the first active admin through the D1 operator console using `access:<sub>` or `service:<common_name>` as the Actor identity and the same Actor ID in `created_by` and `updated_by`.
+1. If the database has no Actor, insert the first active admin through the D1 operator console using `access:<sub>` or `service:<common_name>` as the Actor identity and the same Actor ID in `created_by` and `updated_by`.
 2. Confirm Cloudflare Access protects the registry API, `/healthz`, `/openapi.json`, `/docs`, and the main UI.
 3. Confirm the active `BACKUP_ACTOR_ID` can run scheduled maintenance.
 4. Exercise the deployed Access session and cookie policy, D1 concurrency, and Queue/R2 partial-failure recovery.

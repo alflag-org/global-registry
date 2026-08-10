@@ -33,6 +33,8 @@ Resources have immutable keys, a provider-neutral kind, a lifecycle state, a sep
 
 An operation stores an immutable plan and SHA-256 plan hash. Its resource scopes are planned before locks are acquired. A lock belongs to the operation creator and Actor, expires, and carries a fencing token backed by a retained per-scope generation. Mutations that use an operation verify the current lease and fencing token. Revision and fencing failures prevent stale state from being written.
 
+Entering `succeeded` uses a dedicated completion path. In the same fenced D1 batch that updates the operation and records its audit/outbox entries, the registry requires every planned resource to be at its target lifecycle, every step to be `succeeded` or `skipped`, and every Registry-visible binding or relationship change to match its planned postcondition. Other terminal statuses use the ordinary status-transition path.
+
 State changes, audit events, and outbox rows are written atomically in D1. A failed compare-and-swap mutation does not create an audit event. Persisted JSON and audit payloads are normalized and bounded before storage.
 
 ## Authentication path
@@ -57,4 +59,4 @@ The portable format is schema-validated and inspectable, but its bounded reads a
 
 Scheduled maintenance requires an operator-owned Cron Trigger, an active admin Actor in `BACKUP_ACTOR_ID`, and the asynchronous bindings. It archives expired observations, prunes retained exports, creates the daily export request, and dispatches pending outbox rows in bounded work units.
 
-The schema is defined by the single [`migrations/0001_initial.sql`](../migrations/0001_initial.sql) migration. D1 constraints and triggers enforce identity, active-admin, lifecycle, JSON, revision, append-only, fencing-generation, foreign-key, and relationship invariants.
+The schema is built from the forward-only SQL files in [`migrations/`](../migrations). `0001_initial.sql` is frozen; later files use contiguous sequence numbers and are recorded by the Wrangler/D1 migration ledger. The repository does not maintain a second ledger. D1 constraints and triggers enforce identity, active-admin, lifecycle, JSON, revision, append-only, fencing-generation, foreign-key, and relationship invariants.
