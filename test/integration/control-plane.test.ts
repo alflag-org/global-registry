@@ -1,7 +1,12 @@
 import { env } from 'cloudflare:workers';
 import { SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { validateRegistrySnapshot } from '../../src/application/registry-validation';
+import {
+  assertPortableExportChunk,
+  assertPortableExportManifest,
+  manifestChecksumPayload,
+  PORTABLE_EXPORT_ENTITIES,
+} from '../../src/application/registry-snapshot';
 import { D1GlobalRegistryRepository } from '../../src/adapters/d1/repository';
 import { R2ExportWriter } from '../../src/adapters/r2/exporter';
 import { R2ObservationArchiver } from '../../src/adapters/r2/observation-archiver';
@@ -18,6 +23,13 @@ function asRecord(value: unknown): JsonRecord {
 function exportsBucket(): R2Bucket {
   if (env.EXPORTS_BUCKET === undefined) throw new Error('test R2 binding is unavailable');
   return env.EXPORTS_BUCKET;
+}
+
+async function checksum(body: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')}`;
 }
 
 function headers(identity: string, json = false): Headers {
@@ -689,6 +701,49 @@ describe.sequential('control-plane API', () => {
     );
     expect(start.status).toBe(200);
 
+    const completionRepository = new D1GlobalRegistryRepository(env.DB);
+    await expect(
+      completionRepository.updateOperationStatus({
+        id: operationId,
+        sourceStatus: 'running',
+        targetStatus: 'succeeded',
+        expectedRevision: 2,
+        lockScope: 'resource/lock-host',
+        fencingToken,
+        actorId: 'actor-provisioner',
+      }),
+    ).rejects.toMatchObject({ code: 'operation_completion_required' });
+    await expect(
+      completionRepository.completeOperation({
+        id: operationId,
+        expectedRevision: 2,
+        lockScope: 'resource/lock-host',
+        fencingToken,
+        actorId: 'actor-provisioner',
+      }),
+    ).rejects.toMatchObject({
+      code: 'operation_completion_incomplete',
+      details: {
+        incompleteResources: 1,
+        incompleteSteps: 1,
+        incompleteChanges: 0,
+      },
+    });
+    const unchangedIncompleteOperation = await env.DB.prepare(
+      `SELECT status, revision FROM operations WHERE id = ?`,
+    )
+      .bind(operationId)
+      .first<{ status: string; revision: number }>();
+    expect(unchangedIncompleteOperation).toEqual({ status: 'running', revision: 2 });
+    expect(
+      await env.DB.prepare(
+        `SELECT COUNT(*) AS count FROM events
+         WHERE operation_id = ? AND event_type = 'operation.succeeded'`,
+      )
+        .bind(operationId)
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+
     const staleFence = await request(
       'access:test-provisioner',
       '/api/v1/resources/lock-host/transitions',
@@ -719,6 +774,23 @@ describe.sequential('control-plane API', () => {
     );
     expect(transition.status).toBe(200);
     expect(asRecord(await transition.json()).lifecycleState).toBe('allocated');
+
+    const incompleteStep = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: 2,
+          lockScope: 'resource/lock-host',
+          fencingToken,
+        }),
+      },
+    );
+    expect(incompleteStep.status).toBe(409);
+    expect(asRecord(await incompleteStep.json()).error).toMatchObject({
+      code: 'operation_completion_incomplete',
+    });
 
     const operationDetail = await request(
       'access:test-provisioner',
@@ -758,6 +830,19 @@ describe.sequential('control-plane API', () => {
     );
     expect(complete.status).toBe(200);
     expect(asRecord(await complete.json()).status).toBe('succeeded');
+    const completionEvents = await env.DB.prepare(
+      `SELECT event.event_type, message.topic
+       FROM events event JOIN outbox message ON message.event_id = event.event_id
+       WHERE event.operation_id = ? AND event.event_type = 'operation.succeeded'`,
+    )
+      .bind(operationId)
+      .all<{ event_type: string; topic: string }>();
+    expect(completionEvents.results).toEqual([
+      {
+        event_type: 'operation.succeeded',
+        topic: 'global-registry.operation.succeeded',
+      },
+    ]);
 
     const release = await request(
       'access:test-provisioner',
@@ -1082,6 +1167,44 @@ describe.sequential('control-plane API', () => {
     await env.DB.prepare(`UPDATE operations SET status = 'running' WHERE id = ?`)
       .bind(operationId)
       .run();
+    const changeOperationDetail = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}`,
+    );
+    expect(changeOperationDetail.status).toBe(200);
+    const changeOperationSteps = asRecord(await changeOperationDetail.json())
+      .steps as Array<JsonRecord>;
+    const changeOperationStep = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/steps/${String(changeOperationSteps[0]?.id)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'skipped',
+          evidence: { reason: 'registry-only changes' },
+          expectedRevision: 1,
+          lockScope: 'resource/bound-host',
+          fencingToken,
+        }),
+      },
+    );
+    expect(changeOperationStep.status).toBe(200);
+    await expect(
+      atomicGuardRepository.completeOperation({
+        id: operationId,
+        expectedRevision: 2,
+        lockScope: 'resource/bound-host',
+        fencingToken,
+        actorId: 'actor-provisioner',
+      }),
+    ).rejects.toMatchObject({
+      code: 'operation_completion_incomplete',
+      details: {
+        incompleteResources: 0,
+        incompleteSteps: 0,
+        incompleteChanges: 2,
+      },
+    });
     await expect(
       atomicGuardRepository.replaceBinding({
         resourceKey: 'bound-host',
@@ -1313,6 +1436,21 @@ describe.sequential('control-plane API', () => {
       code: 'provider_incompatible',
     });
 
+    const completeChanges = await request(
+      'access:test-provisioner',
+      `/api/v1/operations/${operationId}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: 2,
+          lockScope: 'resource/bound-host',
+          fencingToken,
+        }),
+      },
+    );
+    expect(completeChanges.status).toBe(200);
+    expect(asRecord(await completeChanges.json()).status).toBe('succeeded');
+
     const detail = await request('access:test-admin', '/api/v1/resources/bound-host');
     expect(detail.status).toBe(200);
     expect(asRecord(await detail.json())).toMatchObject({
@@ -1417,6 +1555,23 @@ describe.sequential('control-plane API', () => {
     );
     expect(startRemoval.status).toBe(200);
 
+    await expect(
+      atomicGuardRepository.completeOperation({
+        id: removalOperationId,
+        expectedRevision: 2,
+        lockScope: 'resource/bound-host',
+        fencingToken: removalFencingToken,
+        actorId: 'actor-operator',
+      }),
+    ).rejects.toMatchObject({
+      code: 'operation_completion_incomplete',
+      details: {
+        incompleteResources: 0,
+        incompleteSteps: 0,
+        incompleteChanges: 2,
+      },
+    });
+
     const bindingRevisionBeforeStaleRemoval = await env.DB.prepare(
       `SELECT binding_revision FROM providers WHERE id = 'provider-primary'`,
     ).first<{ binding_revision: number }>();
@@ -1490,6 +1645,21 @@ describe.sequential('control-plane API', () => {
     );
     expect(removeBinding.status).toBe(204);
 
+    const completeRemoval = await request(
+      'access:test-operator',
+      `/api/v1/operations/${removalOperationId}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: 2,
+          lockScope: 'resource/bound-host',
+          fencingToken: removalFencingToken,
+        }),
+      },
+    );
+    expect(completeRemoval.status).toBe(200);
+    expect(asRecord(await completeRemoval.json()).status).toBe('succeeded');
+
     const historyCounts = await env.DB.batch([
       env.DB.prepare(
         `SELECT COUNT(*) AS count FROM resource_relationship_history
@@ -1529,15 +1699,24 @@ describe.sequential('control-plane API', () => {
 
     const object = await exportsBucket().get(completed?.r2ObjectKey ?? 'missing');
     expect(object).not.toBeNull();
-    const contents = await object?.text();
-    expect(contents).toContain('"resources"');
-    expect(contents).toContain('"outbox"');
-    expect(contents).toContain('"relationshipHistory"');
-    expect(contents).toContain('"operationChanges"');
-    expect(validateRegistrySnapshot(JSON.parse(contents ?? 'null'))).toMatchObject({
-      valid: true,
-      violations: [],
-    });
+    const manifestBody = (await object?.text()) ?? '';
+    const manifest = assertPortableExportManifest(JSON.parse(manifestBody || 'null'));
+    expect(manifest.checksum).toBe(await checksum(manifestChecksumPayload(manifest)));
+    expect(completed?.checksum).toBe(await checksum(manifestBody));
+    expect(manifest.chunks.map((chunk) => chunk.entity)).toEqual(PORTABLE_EXPORT_ENTITIES);
+    for (const reference of manifest.chunks) {
+      const chunkObject = await exportsBucket().get(reference.key);
+      expect(chunkObject).not.toBeNull();
+      const body = await chunkObject?.text();
+      expect(reference.checksum).toBe(await checksum(body ?? ''));
+      const chunk = assertPortableExportChunk(JSON.parse(body ?? 'null'));
+      expect(chunk).toMatchObject({
+        exportId: manifest.exportId,
+        entity: reference.entity,
+        sequence: reference.sequence,
+      });
+      expect(chunk.rows).toHaveLength(reference.rows);
+    }
 
     const exportEvents = await env.DB.prepare(
       `SELECT event.event_type

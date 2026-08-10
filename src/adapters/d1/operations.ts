@@ -1,6 +1,7 @@
 import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
+  CompleteOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -40,6 +41,79 @@ function operationResource(row: OperationResourceRow): OperationDetail['resource
     sourceState: row.source_state,
     targetState: row.target_state,
     resourceRevision: row.resource_revision,
+  };
+}
+
+interface CompletionIssueCounts {
+  incomplete_resources: number;
+  incomplete_steps: number;
+  incomplete_changes: number;
+}
+
+function completionIssuesSql(): string {
+  return `
+    SELECT 'resource' AS kind
+    FROM operation_resources planned_resource
+    LEFT JOIN resources current_resource ON current_resource.id = planned_resource.resource_id
+    WHERE planned_resource.operation_id = ?
+      AND (
+        current_resource.id IS NULL
+        OR current_resource.lifecycle_state <> planned_resource.target_state
+      )
+
+    UNION ALL
+
+    SELECT 'step' AS kind
+    FROM operation_steps planned_step
+    WHERE planned_step.operation_id = ?
+      AND planned_step.status NOT IN ('succeeded', 'skipped')
+
+    UNION ALL
+
+    SELECT 'change' AS kind
+    FROM operation_changes planned_change
+    WHERE planned_change.operation_id = ?
+      AND NOT (
+        (
+          planned_change.action = 'binding.replace'
+          AND EXISTS (
+            SELECT 1 FROM provider_bindings current_binding
+            WHERE current_binding.resource_id = planned_change.resource_id
+              AND current_binding.provider_id = planned_change.provider_id
+              AND current_binding.provider_resource_type = planned_change.provider_resource_type
+              AND current_binding.provider_resource_id = planned_change.provider_resource_id
+          )
+        )
+        OR (
+          planned_change.action = 'binding.remove'
+          AND NOT EXISTS (
+            SELECT 1 FROM provider_bindings current_binding
+            WHERE current_binding.resource_id = planned_change.resource_id
+          )
+        )
+        OR (
+          planned_change.action = 'relationship.create'
+          AND EXISTS (
+            SELECT 1 FROM resource_relationships current_relationship
+            WHERE current_relationship.source_resource_id = planned_change.resource_id
+              AND current_relationship.target_resource_id = planned_change.target_resource_id
+              AND current_relationship.relationship_type = planned_change.relationship_type
+          )
+        )
+        OR (
+          planned_change.action = 'relationship.remove'
+          AND NOT EXISTS (
+            SELECT 1 FROM resource_relationships current_relationship
+            WHERE current_relationship.id = planned_change.relationship_id
+          )
+        )
+      )`;
+}
+
+function completionPredicate(operationId: string): SqlPredicate {
+  return {
+    sql: `NOT EXISTS (${completionIssuesSql()})`,
+    params: [operationId, operationId, operationId],
   };
 }
 
@@ -460,7 +534,98 @@ export class D1Operations extends D1Client {
     return updated;
   }
 
+  async complete(input: CompleteOperationCommand): Promise<Operation> {
+    const changedAt = new Date().toISOString();
+    await assertFence(
+      this,
+      input.lockScope,
+      input.id,
+      input.fencingToken,
+      changedAt,
+      input.actorId,
+    );
+    const fence = fencePredicate(
+      input.lockScope,
+      input.id,
+      input.fencingToken,
+      changedAt,
+      input.actorId,
+    );
+    const completion = completionPredicate(input.id);
+    const event = eventStatements(
+      this.statement.bind(this),
+      {
+        eventType: 'operation.succeeded',
+        actorId: input.actorId,
+        operationId: input.id,
+        payload: {
+          from: 'running',
+          to: 'succeeded',
+          expectedRevision: input.expectedRevision,
+          verification: 'authoritative_state',
+        },
+      },
+      {
+        sql: `EXISTS (
+          SELECT 1 FROM operations
+          WHERE id = ? AND status = 'succeeded' AND revision = ? AND updated_at = ?
+        ) AND ${fence.sql} AND ${completion.sql}`,
+        params: [
+          input.id,
+          input.expectedRevision + 1,
+          changedAt,
+          ...fence.params,
+          ...completion.params,
+        ],
+      },
+    );
+    const results = await this.db.batch([
+      this.statement(
+        `UPDATE operations SET status = 'succeeded', revision = revision + 1, updated_at = ?
+         WHERE id = ? AND revision = ? AND status = 'running'
+           AND ${fence.sql} AND ${completion.sql}`,
+        changedAt,
+        input.id,
+        input.expectedRevision,
+        ...fence.params,
+        ...completion.params,
+      ),
+      ...event,
+    ]);
+    if (results[0]?.meta.changes !== 1) {
+      const current = await this.get(input.id);
+      if (current?.status === 'running' && current.revision === input.expectedRevision) {
+        const issues = await this.completionIssueCounts(input.id);
+        if (
+          issues.incomplete_resources > 0 ||
+          issues.incomplete_steps > 0 ||
+          issues.incomplete_changes > 0
+        ) {
+          throw new ConflictError(
+            'operation_completion_incomplete',
+            'The operation plan has not reached every completion condition.',
+            {
+              incompleteResources: issues.incomplete_resources,
+              incompleteSteps: issues.incomplete_steps,
+              incompleteChanges: issues.incomplete_changes,
+            },
+          );
+        }
+      }
+      requireMutation(results[0], 'Operation', input.id);
+    }
+    const updated = await this.get(input.id);
+    if (updated === null) throw new NotFoundError('Operation', input.id);
+    return updated;
+  }
+
   async updateStatus(input: ChangeOperationStatusCommand): Promise<Operation> {
+    if (input.targetStatus === 'succeeded') {
+      throw new ConflictError(
+        'operation_completion_required',
+        'Use the dedicated completion operation to enter succeeded status.',
+      );
+    }
     const changedAt = new Date().toISOString();
     await assertFence(
       this,
@@ -588,5 +753,22 @@ export class D1Operations extends D1Client {
     );
     if (row === null) throw new NotFoundError('Operation step', input.stepId);
     return mapOperationStep(row);
+  }
+
+  private async completionIssueCounts(operationId: string): Promise<CompletionIssueCounts> {
+    const counts = await this.first<CompletionIssueCounts>(
+      `SELECT
+        COALESCE(SUM(CASE WHEN issue.kind = 'resource' THEN 1 ELSE 0 END), 0)
+          AS incomplete_resources,
+        COALESCE(SUM(CASE WHEN issue.kind = 'step' THEN 1 ELSE 0 END), 0)
+          AS incomplete_steps,
+        COALESCE(SUM(CASE WHEN issue.kind = 'change' THEN 1 ELSE 0 END), 0)
+          AS incomplete_changes
+       FROM (${completionIssuesSql()}) issue`,
+      operationId,
+      operationId,
+      operationId,
+    );
+    return counts ?? { incomplete_resources: 0, incomplete_steps: 0, incomplete_changes: 0 };
   }
 }

@@ -8,7 +8,13 @@ import {
 import { consumeOutboxBatch } from '../../src/adapters/queue/outbox-consumer';
 import { EXPORT_LEASE_MS } from '../../src/adapters/d1/exports';
 import { D1GlobalRegistryRepository } from '../../src/adapters/d1/repository';
-import { serializePortableSnapshot } from '../../src/application/registry-snapshot';
+import {
+  assertPortableExportChunk,
+  assertPortableExportManifest,
+  manifestChecksumPayload,
+  PORTABLE_EXPORT_ENTITIES,
+  type PortableExportManifest,
+} from '../../src/application/registry-snapshot';
 import { R2ExportWriter } from '../../src/adapters/r2/exporter';
 
 const actorId = 'export-recovery-admin';
@@ -54,7 +60,7 @@ async function exportState(exportId: string): Promise<ExportRowState> {
 async function seedRunningAtLimit(repository: D1GlobalRegistryRepository): Promise<string> {
   const exportRecord = await repository.createExport(actorId);
   const claimToken = crypto.randomUUID();
-  const claimObjectKey = `exports/${encodeURIComponent(exportRecord.id)}/7-${claimToken}.json`;
+  const claimObjectKey = `exports/${encodeURIComponent(exportRecord.id)}/7-${claimToken}/manifest.json`;
   await env.DB.prepare(
     `UPDATE exports
         SET status = 'running', attempts = ?, lease_until = ?, revision = ?,
@@ -156,9 +162,9 @@ async function prepareStaleDispatchingOutboxDelivery(
 
 async function putObject(
   exportId: string,
-  body: string,
+  body = '{"stale":true}',
   metadata: Record<string, string> = {},
-): Promise<{ key: string; digest: string }> {
+): Promise<{ key: string; digest: string; prefix: string; keys: string[]; body: string }> {
   const claim = await env.DB.prepare(
     'SELECT revision, claim_token, claim_object_key FROM exports WHERE id = ?',
   )
@@ -166,7 +172,19 @@ async function putObject(
     .first<{ revision: number; claim_token: string; claim_object_key: string }>();
   if (claim === null) throw new Error(`Export claim for ${exportId} was not found.`);
   const key = claim.claim_object_key;
+  if (!key.endsWith('manifest.json')) throw new Error('Expected a manifest claim key.');
+  const prefix = key.slice(0, -'manifest.json'.length);
+  const chunkKey = `${prefix}events-000001.json`;
   const digest = await checksum(body);
+  await exportsBucket().put(chunkKey, '{"staleChunk":true}', {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: {
+      exportId,
+      schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
+      claimToken: claim.claim_token,
+      revision: String(claim.revision),
+    },
+  });
   await exportsBucket().put(key, body, {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
     customMetadata: {
@@ -178,7 +196,28 @@ async function putObject(
       ...metadata,
     },
   });
-  return { key, digest };
+  return { key, digest, prefix, keys: [chunkKey, key], body };
+}
+
+async function readManifest(key: string): Promise<PortableExportManifest> {
+  const object = await exportsBucket().get(key);
+  if (object === null) throw new Error(`Manifest ${key} was not found.`);
+  const manifest = assertPortableExportManifest(JSON.parse(await object.text()));
+  expect(manifest.checksum).toBe(await checksum(manifestChecksumPayload(manifest)));
+  for (const reference of manifest.chunks) {
+    const chunkObject = await exportsBucket().get(reference.key);
+    expect(chunkObject).not.toBeNull();
+    const body = await chunkObject?.text();
+    expect(reference.checksum).toBe(await checksum(body ?? ''));
+    const chunk = assertPortableExportChunk(JSON.parse(body ?? 'null'));
+    expect(chunk).toMatchObject({
+      exportId: manifest.exportId,
+      entity: reference.entity,
+      sequence: reference.sequence,
+    });
+    expect(chunk.rows).toHaveLength(reference.rows);
+  }
+  return manifest;
 }
 
 function oneMessageBatch(
@@ -273,6 +312,22 @@ describe.sequential('D1 export recovery', () => {
     expect(await exportState(exportRecord.id)).toEqual(before);
   });
 
+  it('uses the current chunked schema when retrying an export created by an older release', async () => {
+    const repository = new D1GlobalRegistryRepository(env.DB);
+    const exportRecord = await repository.createExport(actorId);
+    await env.DB.prepare("UPDATE exports SET schema_version = '1.1' WHERE id = ?")
+      .bind(exportRecord.id)
+      .run();
+
+    const attempt = await repository.claimExport(exportRecord.id, claimedAt);
+
+    expect(attempt).not.toBeNull();
+    expect(await repository.getExport(exportRecord.id)).toMatchObject({
+      schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
+      status: 'running',
+    });
+  });
+
   it('does not reclaim a failed export at the attempt bound', async () => {
     const repository = new D1GlobalRegistryRepository(env.DB);
     const exportId = await seedFailedAtLimit(repository);
@@ -284,11 +339,56 @@ describe.sequential('D1 export recovery', () => {
     expect(await exportState(exportId)).toEqual(before);
   });
 
+  it('exports more than 1,000 audit and outbox rows as bounded consecutive chunks', async () => {
+    const timestamp = '2026-08-01T00:00:00.000Z';
+    for (let offset = 0; offset < 1_001; offset += 50) {
+      const statements: D1PreparedStatement[] = [];
+      for (let index = offset; index < Math.min(offset + 50, 1_001); index += 1) {
+        const suffix = String(index).padStart(4, '0');
+        const payload = JSON.stringify({ index });
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO events (
+               event_id, event_type, actor_id, payload_json, occurred_at
+             ) VALUES (?, 'test.export.scale', ?, ?, ?)`,
+          ).bind(`evt_export_scale_${suffix}`, actorId, payload, timestamp),
+          env.DB.prepare(
+            `INSERT INTO outbox (
+               id, event_id, topic, payload_json, created_at, updated_at
+             ) VALUES (?, ?, 'test.export.scale', ?, ?, ?)`,
+          ).bind(
+            `out_export_scale_${suffix}`,
+            `evt_export_scale_${suffix}`,
+            payload,
+            timestamp,
+            timestamp,
+          ),
+        );
+      }
+      await env.DB.batch(statements);
+    }
+    const repository = new D1GlobalRegistryRepository(env.DB);
+    const requested = await repository.createExport(actorId);
+
+    await new R2ExportWriter(repository, exportsBucket()).write(requested.id);
+
+    const completed = await repository.getExport(requested.id);
+    const manifest = await readManifest(completed?.r2ObjectKey ?? '');
+    for (const entity of ['events', 'outbox'] as const) {
+      const references = manifest.chunks.filter((chunk) => chunk.entity === entity);
+      expect(references.length).toBeGreaterThan(1);
+      expect(references.map((chunk) => chunk.sequence)).toEqual(
+        Array.from({ length: references.length }, (_, index) => index + 1),
+      );
+      expect(references.every((chunk) => chunk.rows <= 1_000)).toBe(true);
+      expect(references.reduce((total, chunk) => total + chunk.rows, 0)).toBeGreaterThan(1_000);
+    }
+  });
+
   it('writes a fenced canonical R2 body during stale recovery', async () => {
     const repository = new D1GlobalRegistryRepository(env.DB);
     const exportId = await seedRunningAtLimit(repository);
-    const body = serializePortableSnapshot(await repository.buildPortableSnapshot());
-    const object = await putObject(exportId, body);
+    const object = await putObject(exportId);
 
     await new R2ExportWriter(repository, exportsBucket()).write(exportId);
 
@@ -299,20 +399,22 @@ describe.sequential('D1 export recovery', () => {
       attempts: MAX_EXPORT_ATTEMPTS,
     });
     expect(completed?.r2ObjectKey).not.toBe(object.key);
-    expect(await exportsBucket().get(object.key)).toBeNull();
+    for (const key of object.keys) expect(await exportsBucket().get(key)).toBeNull();
+    const manifest = await readManifest(completed?.r2ObjectKey ?? '');
+    expect(new Set(manifest.chunks.map((chunk) => chunk.entity))).toEqual(
+      new Set(PORTABLE_EXPORT_ENTITIES),
+    );
     const stored = await exportsBucket().get(completed?.r2ObjectKey ?? '');
-    expect(stored).not.toBeNull();
-    const storedBody = await stored?.text();
-    expect(storedBody).toBeDefined();
-    expect(storedBody).not.toBe(body);
-    const storedDigest = await checksum(storedBody ?? '');
-    expect(completed?.checksum).toBe(storedDigest);
+    expect(completed?.checksum).toBe(await checksum((await stored?.text()) ?? ''));
+    expect(completed?.checksum).not.toBe(manifest.checksum);
     const storedMetadata = (await exportsBucket().head(completed?.r2ObjectKey ?? ''))
       ?.customMetadata;
     expect(storedMetadata).toMatchObject({
       exportId,
-      checksum: storedDigest,
+      checksum: completed?.checksum,
+      manifestChecksum: manifest.checksum,
       schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
+      objectType: 'portable-export-manifest',
     });
     expect(storedMetadata?.claimToken).toBe((await exportState(exportId)).r2_claim_token);
   });
@@ -320,8 +422,7 @@ describe.sequential('D1 export recovery', () => {
   it('reaches stale export recovery on the sixth outbox delivery and acknowledges success', async () => {
     const repository = new D1GlobalRegistryRepository(env.DB);
     const exportId = await seedRunningAtLimit(repository);
-    const body = serializePortableSnapshot(await repository.buildPortableSnapshot());
-    const object = await putObject(exportId, body);
+    const object = await putObject(exportId);
     const message = await prepareFinalOutboxDelivery(exportId);
     const calls: string[] = [];
 
@@ -338,11 +439,11 @@ describe.sequential('D1 export recovery', () => {
       status: 'succeeded',
       attempts: MAX_EXPORT_ATTEMPTS,
     });
-    expect(await exportsBucket().get(object.key)).toBeNull();
+    for (const key of object.keys) expect(await exportsBucket().get(key)).toBeNull();
+    const manifest = await readManifest(completed?.r2ObjectKey ?? '');
     const stored = await exportsBucket().get(completed?.r2ObjectKey ?? '');
-    expect(stored).not.toBeNull();
-    const storedBody = await stored?.text();
-    expect(completed?.checksum).toBe(await checksum(storedBody ?? ''));
+    expect(completed?.checksum).toBe(await checksum((await stored?.text()) ?? ''));
+    expect(completed?.checksum).not.toBe(manifest.checksum);
     expect(await repository.getOutboxEventStatus(message.eventId)).toBe('published');
     const outbox = await env.DB.prepare(
       'SELECT consumer_attempts, producer_attempts FROM outbox WHERE event_id = ?',
@@ -358,8 +459,7 @@ describe.sequential('D1 export recovery', () => {
   it('reclaims a stale dispatching outbox lease after worker interruption', async () => {
     const repository = new D1GlobalRegistryRepository(env.DB);
     const exportId = await seedRunningAtLimit(repository);
-    const body = serializePortableSnapshot(await repository.buildPortableSnapshot());
-    await putObject(exportId, body);
+    await putObject(exportId);
     const message = await prepareStaleDispatchingOutboxDelivery(exportId);
     const calls: string[] = [];
 

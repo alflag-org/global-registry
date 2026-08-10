@@ -6,10 +6,10 @@ import {
   PORTABLE_EXPORT_QUERY_LIMIT,
   PORTABLE_EXPORT_SCHEMA_VERSION,
 } from '../../application/limits';
-import { assertValidRegistrySnapshot } from '../../application/registry-validation';
 import {
-  assertPortableExportRowCapacity,
-  type PortableRegistrySnapshot,
+  assertPortableExportChunk,
+  type PortableExportChunk,
+  type PortableExportEntity,
 } from '../../application/registry-snapshot';
 import { parseJsonObject } from '../../domain/models/json';
 import type { ExportRecord } from '../../domain/models/global-registry';
@@ -32,25 +32,19 @@ import type {
   BindingHistoryRow,
   BindingRow,
   DriftRow,
-  EventRow,
   ExportRow,
-  HealthRow,
   LockGenerationRow,
   LockRow,
   ObservationRow,
   OperationChangeRow,
   OperationResourceRow,
-  OperationRow,
   OperationStepRow,
   OutboxRow,
   PolicyRow,
   PolicyVersionRow,
   ProfileRow,
   ProfileVersionRow,
-  ProviderRow,
   RelationshipHistoryRow,
-  RelationshipRow,
-  ResourceRow,
 } from './types';
 
 function now(): string {
@@ -60,7 +54,71 @@ function now(): string {
 export const EXPORT_LEASE_MS = 5 * 60 * 1000;
 
 function exportClaimObjectKey(exportId: string, revision: number, claimToken: string): string {
-  return `exports/${encodeURIComponent(exportId)}/${revision}-${claimToken}.json`;
+  return `exports/${encodeURIComponent(exportId)}/${revision}-${claimToken}/manifest.json`;
+}
+
+interface PortableExportCursorRow {
+  __export_cursor: number;
+}
+
+interface PortableExportReader {
+  entity: PortableExportEntity;
+  cursorTable: string;
+  query: string;
+  map: (row: never) => unknown;
+}
+
+const portableExportReaders: PortableExportReader[] = [
+  reader('actors', 'actors', mapActorSnapshot),
+  reader('providers', 'providers', mapProvider),
+  reader('profiles', 'profiles', mapProfileSnapshot),
+  reader('profileVersions', 'profile_versions', mapProfileVersionSnapshot),
+  reader('policies', 'policies', mapPolicySnapshot),
+  reader('policyVersions', 'policy_versions', mapPolicyVersionSnapshot),
+  reader('resources', 'resources', mapResource),
+  reader('relationships', 'resource_relationships', mapRelationship),
+  reader('relationshipHistory', 'resource_relationship_history', mapRelationshipHistory),
+  reader('bindings', 'provider_bindings', mapBindingSnapshot),
+  reader('bindingHistory', 'provider_binding_history', mapBindingHistory),
+  reader('health', 'health', mapHealth),
+  reader('observations', 'observations', mapObservation),
+  reader('drifts', 'drifts', mapDriftSnapshot),
+  reader('operations', 'operations', mapOperation),
+  {
+    entity: 'operationResources',
+    cursorTable: 'operation_resources',
+    query: `SELECT operation_resources.rowid AS __export_cursor,
+                   operation_resources.*, resources.key AS resource_key
+              FROM operation_resources
+              JOIN resources ON resources.id = operation_resources.resource_id
+             WHERE operation_resources.rowid > ? AND operation_resources.rowid <= ?
+             ORDER BY operation_resources.rowid
+             LIMIT ?`,
+    map: mapOperationResource as (row: never) => unknown,
+  },
+  reader('operationSteps', 'operation_steps', mapOperationStepSnapshot),
+  reader('operationChanges', 'operation_changes', mapOperationChange),
+  reader('locks', 'resource_locks', mapLock),
+  reader('lockGenerations', 'resource_lock_generations', mapLockGeneration),
+  reader('events', 'events', mapEvent),
+  reader('outbox', 'outbox', mapOutbox),
+  reader('exports', 'exports', mapExportSnapshot),
+];
+
+function reader<Row>(
+  entity: PortableExportEntity,
+  table: string,
+  map: (row: Row) => unknown,
+): PortableExportReader {
+  return {
+    entity,
+    cursorTable: table,
+    query: `SELECT rowid AS __export_cursor, * FROM ${table}
+             WHERE rowid > ? AND rowid <= ?
+             ORDER BY rowid
+             LIMIT ?`,
+    map: map as (row: never) => unknown,
+  };
 }
 
 export class D1Exports extends D1Client {
@@ -357,6 +415,7 @@ export class D1Exports extends D1Client {
           claimToken,
           revision,
           attempt: current.attempts,
+          schemaVersion: current.schema_version,
         },
       },
       {
@@ -389,6 +448,28 @@ export class D1Exports extends D1Client {
       ...event,
     ]);
     requireMutation(results[0], 'Export', id);
+  }
+
+  async renew(input: {
+    exportId: string;
+    revision: number;
+    objectKey: string;
+    claimToken: string;
+  }): Promise<void> {
+    const renewedAt = now();
+    const leaseUntil = new Date(Date.parse(renewedAt) + EXPORT_LEASE_MS).toISOString();
+    const result = await this.statement(
+      `UPDATE exports SET lease_until = ?, updated_at = ?
+       WHERE id = ? AND status = 'running' AND revision = ?
+         AND claim_token = ? AND claim_object_key = ?`,
+      leaseUntil,
+      renewedAt,
+      input.exportId,
+      input.revision,
+      input.claimToken,
+      input.objectKey,
+    ).run();
+    requireMutation(result, 'Export', input.exportId);
   }
 
   async fail(input: {
@@ -455,74 +536,70 @@ export class D1Exports extends D1Client {
     requireMutation(results[0], 'Export', id);
   }
 
-  async buildPortableSnapshot(): Promise<PortableRegistrySnapshot> {
-    const bounded = (sql: string) => this.statement(`${sql}\nLIMIT ?`, PORTABLE_EXPORT_QUERY_LIMIT);
-    const statements = [
-      bounded('SELECT * FROM actors ORDER BY id'),
-      bounded('SELECT * FROM providers ORDER BY id'),
-      bounded('SELECT * FROM profiles ORDER BY key'),
-      bounded('SELECT * FROM profile_versions ORDER BY profile_key, version'),
-      bounded('SELECT * FROM policies ORDER BY namespace, key'),
-      bounded('SELECT * FROM policy_versions ORDER BY namespace, policy_key, version'),
-      bounded('SELECT * FROM resources ORDER BY key'),
-      bounded('SELECT * FROM resource_relationships ORDER BY id'),
-      bounded('SELECT * FROM resource_relationship_history ORDER BY removed_at, id'),
-      bounded('SELECT * FROM provider_bindings ORDER BY resource_id'),
-      bounded('SELECT * FROM provider_binding_history ORDER BY unbound_at, id'),
-      bounded('SELECT * FROM health ORDER BY resource_id'),
-      bounded('SELECT * FROM observations ORDER BY created_at, id'),
-      bounded('SELECT * FROM drifts ORDER BY id'),
-      bounded('SELECT * FROM operations ORDER BY created_at, id'),
-      bounded(
-        `SELECT operation_resources.*, resources.key AS resource_key
-           FROM operation_resources
-           JOIN resources ON resources.id = operation_resources.resource_id
-          ORDER BY operation_resources.operation_id, operation_resources.resource_id`,
-      ),
-      bounded('SELECT * FROM operation_steps ORDER BY operation_id, position'),
-      bounded('SELECT * FROM operation_changes ORDER BY operation_id, position'),
-      bounded('SELECT * FROM resource_locks ORDER BY scope'),
-      bounded('SELECT * FROM resource_lock_generations ORDER BY scope'),
-      bounded('SELECT * FROM events ORDER BY occurred_at, event_id'),
-      bounded('SELECT * FROM outbox ORDER BY created_at, id'),
-      bounded('SELECT * FROM exports ORDER BY created_at, id'),
-    ];
-    const results = await this.db.batch(statements);
-    if (results.length !== statements.length || results.some((result) => result.success !== true)) {
-      throw new Error('export_snapshot_batch_failed');
+  async validatePortableExportSource(): Promise<void> {
+    const results = await this.db.batch([
+      this.statement('PRAGMA quick_check(1)'),
+      this.statement('SELECT * FROM pragma_foreign_key_check LIMIT 1'),
+    ]);
+    const quickCheck = results[0]?.results[0] as { quick_check?: unknown } | undefined;
+    if (
+      results.length !== 2 ||
+      results.some((result) => result.success !== true) ||
+      quickCheck?.quick_check !== 'ok' ||
+      results[1]!.results.length !== 0
+    ) {
+      throw new Error('portable_export_source_invalid');
     }
-    const rows = results.map((result) => result.results);
-    assertPortableExportRowCapacity(rows);
-    const snapshot = {
-      schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
-      exportedAt: now(),
-      actors: rows[0]!.map((row) => mapActorSnapshot(row as ActorRow)),
-      providers: rows[1]!.map((row) => mapProvider(row as ProviderRow)),
-      profiles: rows[2]!.map((row) => mapProfileSnapshot(row as ProfileRow)),
-      profileVersions: rows[3]!.map((row) => mapProfileVersionSnapshot(row as ProfileVersionRow)),
-      policies: rows[4]!.map((row) => mapPolicySnapshot(row as PolicyRow)),
-      policyVersions: rows[5]!.map((row) => mapPolicyVersionSnapshot(row as PolicyVersionRow)),
-      resources: rows[6]!.map((row) => mapResource(row as ResourceRow)),
-      relationships: rows[7]!.map((row) => mapRelationship(row as RelationshipRow)),
-      relationshipHistory: rows[8]!.map((row) =>
-        mapRelationshipHistory(row as RelationshipHistoryRow),
+  }
+
+  async *readPortableExportChunks(exportId: string): AsyncIterable<PortableExportChunk> {
+    const ceilingResults = await this.db.batch(
+      portableExportReaders.map((definition) =>
+        this.statement(
+          `SELECT COALESCE(MAX(rowid), 0) AS max_rowid FROM ${definition.cursorTable}`,
+        ),
       ),
-      bindings: rows[9]!.map((row) => mapBindingSnapshot(row as BindingRow)),
-      bindingHistory: rows[10]!.map((row) => mapBindingHistory(row as BindingHistoryRow)),
-      health: rows[11]!.map((row) => mapHealth(row as HealthRow)),
-      observations: rows[12]!.map((row) => mapObservation(row as ObservationRow)),
-      drifts: rows[13]!.map((row) => mapDriftSnapshot(row as DriftRow)),
-      operations: rows[14]!.map((row) => mapOperation(row as OperationRow)),
-      operationResources: rows[15]!.map((row) => mapOperationResource(row as OperationResourceRow)),
-      operationSteps: rows[16]!.map((row) => mapOperationStepSnapshot(row as OperationStepRow)),
-      operationChanges: rows[17]!.map((row) => mapOperationChange(row as OperationChangeRow)),
-      locks: rows[18]!.map((row) => mapLock(row as LockRow)),
-      lockGenerations: rows[19]!.map((row) => mapLockGeneration(row as LockGenerationRow)),
-      events: rows[20]!.map((row) => mapEvent(row as EventRow)),
-      outbox: rows[21]!.map((row) => mapOutbox(row as OutboxRow)),
-      exports: rows[22]!.map((row) => mapExportSnapshot(row as ExportRow)),
-    };
-    return assertValidRegistrySnapshot(snapshot);
+    );
+    if (
+      ceilingResults.length !== portableExportReaders.length ||
+      ceilingResults.some((result) => result.success !== true)
+    ) {
+      throw new Error('portable_export_ceiling_read_failed');
+    }
+
+    for (const [index, definition] of portableExportReaders.entries()) {
+      const ceiling = Number(
+        (ceilingResults[index]?.results[0] as { max_rowid?: unknown } | undefined)?.max_rowid,
+      );
+      if (!Number.isSafeInteger(ceiling) || ceiling < 0) {
+        throw new Error('portable_export_ceiling_invalid');
+      }
+      let cursor = 0;
+      let sequence = 1;
+      do {
+        const rows = await this.all<PortableExportCursorRow>(
+          definition.query,
+          cursor,
+          ceiling,
+          PORTABLE_EXPORT_QUERY_LIMIT,
+        );
+        const chunk = assertPortableExportChunk({
+          schemaVersion: PORTABLE_EXPORT_SCHEMA_VERSION,
+          exportId,
+          entity: definition.entity,
+          sequence,
+          rows: rows.map((row) => definition.map(row as never)),
+        });
+        yield chunk;
+        if (rows.length === 0 || rows.length < PORTABLE_EXPORT_QUERY_LIMIT) break;
+        const nextCursor = rows.at(-1)?.__export_cursor;
+        if (!Number.isSafeInteger(nextCursor) || nextCursor === undefined || nextCursor <= cursor) {
+          throw new Error('portable_export_cursor_invalid');
+        }
+        cursor = nextCursor;
+        sequence += 1;
+      } while (cursor < ceiling);
+    }
   }
 }
 

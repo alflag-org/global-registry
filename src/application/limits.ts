@@ -1,4 +1,4 @@
-/** Current on-disk format for portable registry snapshots. */
+/** Current on-disk format for chunked portable registry exports. */
 export const PORTABLE_EXPORT_SCHEMA_VERSION = '1.2' as const;
 
 /** Maximum number of export processing claims before one stale-lease recovery. */
@@ -22,12 +22,9 @@ export const MAX_EXPORT_RETENTION_WORK = 100;
 /** Export records remain available in R2 for this many days after completion. */
 export const MAX_EXPORT_RETENTION_AGE_DAYS = 365;
 
-/** Per-table row ceiling for one portable export. The extra query row detects overflow. */
-export const MAX_PORTABLE_EXPORT_ROWS_PER_TABLE = 1_000;
-export const PORTABLE_EXPORT_QUERY_LIMIT = MAX_PORTABLE_EXPORT_ROWS_PER_TABLE + 1;
+/** Maximum rows read from D1 and serialized into one portable export chunk. */
+export const MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK = 1_000;
+export const PORTABLE_EXPORT_QUERY_LIMIT = MAX_PORTABLE_EXPORT_ROWS_PER_CHUNK;
 
-/** Total row ceiling across all tables in one portable export. */
-export const MAX_PORTABLE_EXPORT_TOTAL_ROWS = 10_000;
-
-/** Serialized UTF-8 body ceiling for one portable export. */
-export const MAX_PORTABLE_EXPORT_BYTES = 16 * 1024 * 1024;
+/** Serialized UTF-8 ceiling for each independently written portable export object. */
+export const MAX_PORTABLE_EXPORT_OBJECT_BYTES = 16 * 1024 * 1024;

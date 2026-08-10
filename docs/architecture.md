@@ -35,6 +35,8 @@ A provider driver is an extensible lowercase identifier, not a Core enum. Provid
 
 An operation stores an immutable plan and SHA-256 plan hash. Its resource scopes are planned before locks are acquired. A lock belongs to the operation creator and Actor, expires, and carries a fencing token backed by a retained per-scope generation. Mutations that use an operation verify the current lease and fencing token. Revision and fencing failures prevent stale state from being written.
 
+Entering `succeeded` uses a dedicated completion path. In the same fenced D1 batch that updates the operation and records its audit/outbox entries, the registry requires every planned resource to be at its target lifecycle, every step to be `succeeded` or `skipped`, and every Registry-visible binding or relationship change to match its planned postcondition. Other terminal statuses use the ordinary status-transition path.
+
 State changes, audit events, and outbox rows are written atomically in D1. A failed compare-and-swap mutation does not create an audit event. Persisted JSON and audit payloads are normalized and bounded before storage.
 
 ## Authentication path
@@ -51,7 +53,11 @@ Mutation bodies must be `application/json`, are checked against the actual strea
 
 Mutations persist an audit event and its outbox record in D1. Dispatch leases pending rows before sending Queue messages and carries the lease token into consumer claim, completion, and release. Duplicate or stale deliveries cannot complete a newer lease; failures are retried within the configured bounds. This is at-least-once delivery, not exactly-once delivery or snapshot isolation.
 
-An export request is persisted in D1 and processed through the outbox. The portable JSON format is schema `1.2` and contains the 23 registry tables. D1 reads the snapshot in one ordered batch. It caps each table at 1,000 rows and the snapshot at 10,000 rows and 16 MiB after serialization. It validates cross-table invariants, then writes a checksummed object to R2. Each claim owns a revision-, token-, and object-key-specific object. D1 records the successful object only after fenced completion. Exports contain credential references and non-secret provider configuration, never credential values. The repository has no portable JSON importer.
+An export request is persisted in D1 and processed through the outbox. Portable export schema `1.2` represents all 23 registry entities as ordered JSON chunks under a revision- and claim-token-specific R2 prefix. D1 captures a row ceiling for each entity, then reads at most 1,000 rows at a time. The Worker validates each row against that entity's schema, serializes at most one 16 MiB object, supplies its SHA-256 digest for R2 upload integrity validation, verifies the stored metadata, and continues without retaining prior chunk bodies in memory.
+
+The Worker renews the same revision- and token-fenced export lease after verifying each chunk. It writes `manifest.json` only after every entity chunk is present. The manifest records each chunk's entity, sequence, key, row count, and checksum. Its embedded checksum covers the canonical manifest fields other than the checksum field itself. D1 stores the SHA-256 checksum of the complete serialized manifest object and its R2 key only after fenced completion. A failed or stale claim can delete only its token-specific prefix. Provider credential values are never emitted, and the repository has no portable JSON importer.
+
+The portable format is schema-validated and inspectable, but its bounded reads are not a database transaction or a point-in-time recovery image. A raw D1 SQL export remains the full database recovery artifact. D1 operator recovery, not portable JSON import, restores authoritative state.
 
 Scheduled maintenance requires an operator-owned Cron Trigger, an active admin Actor in `BACKUP_ACTOR_ID`, and the asynchronous bindings. It archives expired observations, prunes retained exports, creates the daily export request, and dispatches pending outbox rows in bounded work units.
 

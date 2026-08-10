@@ -23,7 +23,9 @@ function repository(
   return {
     getExport: async () => null,
     claimExport: async () => null,
-    buildPortableSnapshot: async () => ({}) as never,
+    renewExportLease: async () => undefined,
+    validatePortableExportSource: async () => undefined,
+    readPortableExportChunks: async function* () {},
     completeExport: async () => undefined,
     failExport: async () => undefined,
     listRetainableExports: async () => [],

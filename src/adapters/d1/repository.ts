@@ -1,6 +1,7 @@
 import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
+  CompleteOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -321,6 +322,10 @@ export class D1GlobalRegistryRepository {
     return this.operations.transition(input);
   }
 
+  async completeOperation(input: CompleteOperationCommand): Promise<Operation> {
+    return this.operations.complete(input);
+  }
+
   async updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation> {
     return this.operations.updateStatus(input);
   }
@@ -412,6 +417,15 @@ export class D1GlobalRegistryRepository {
     await this.exports.complete(input);
   }
 
+  async renewExportLease(input: {
+    exportId: string;
+    revision: number;
+    objectKey: string;
+    claimToken: string;
+  }): Promise<void> {
+    await this.exports.renew(input);
+  }
+
   async failExport(input: {
     exportId: string;
     revision: number;
@@ -421,7 +435,11 @@ export class D1GlobalRegistryRepository {
     await this.exports.fail(input);
   }
 
-  async buildPortableSnapshot() {
-    return this.exports.buildPortableSnapshot();
+  async validatePortableExportSource(): Promise<void> {
+    await this.exports.validatePortableExportSource();
+  }
+
+  readPortableExportChunks(exportId: string) {
+    return this.exports.readPortableExportChunks(exportId);
   }
 }

@@ -139,9 +139,8 @@ export function registerOperationRoutes(app: OpenAPIHono<ApiEnvironment>): void 
     const { id } = c.req.valid('param');
     await operationForMutation(c, id);
     const body = c.req.valid('json');
-    const operation = await new OperationService(repository(c)).updateStatus({
+    const operation = await new OperationService(repository(c)).complete({
       id,
-      targetStatus: 'succeeded',
       expectedRevision: body.expectedRevision,
       lockScope: body.lockScope,
       fencingToken: body.fencingToken,
