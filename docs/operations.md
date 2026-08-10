@@ -48,6 +48,8 @@ Outbox delivery is at-least-once. A dispatcher leases at most 100 pending rows a
 
 Operation lock scopes are planned `resource/<key>` values. The operation creator and Actor own the lease. The lease must be current and must carry a fencing token. Fencing generations remain after release and advance on grant, renewal, expiry recovery, or reacquisition. A delayed token cannot mutate state after a newer lease. Validate real D1 concurrency in the deployed environment.
 
+Complete an operation with `POST /api/v1/operations/{id}/complete` only after all planned resources have reached their target lifecycle and all steps are `succeeded` or `skipped`. Planned binding replacements must match the current binding, planned removals must be absent, and planned relationship creates or removals must match current D1 state. The endpoint returns `operation_completion_incomplete` without changing the operation or writing a success event when any condition is unmet.
+
 ## Routine verification
 
 Run local verification before an operator-managed deployment:

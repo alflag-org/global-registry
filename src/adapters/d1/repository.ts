@@ -1,6 +1,7 @@
 import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
+  CompleteOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -319,6 +320,10 @@ export class D1GlobalRegistryRepository {
 
   async transition(input: TransitionResourceCommand): Promise<Resource> {
     return this.operations.transition(input);
+  }
+
+  async completeOperation(input: CompleteOperationCommand): Promise<Operation> {
+    return this.operations.complete(input);
   }
 
   async updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation> {

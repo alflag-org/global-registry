@@ -25,6 +25,7 @@ import type { PortableRegistrySnapshot } from './registry-snapshot';
 import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
+  CompleteOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -359,6 +360,7 @@ export interface RegistryRepository {
   }): Promise<LockLease[]>;
   releaseLocks(input: { operationId: string; scopes: string[]; actorId: string }): Promise<void>;
   transition(input: TransitionResourceCommand): Promise<Resource>;
+  completeOperation(input: CompleteOperationCommand): Promise<Operation>;
   updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation>;
   updateOperationStep(input: ChangeOperationStepCommand): Promise<OperationStep>;
 
