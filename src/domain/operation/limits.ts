@@ -8,6 +8,7 @@ export const MAX_OPERATION_STEPS = 32;
 export const MAX_OPERATION_CHANGES = 32;
 export const MAX_OPERATION_WORK_BYTES = 128 * 1024;
 export const MAX_LOCK_SCOPES = 32;
+export const MAX_OPERATION_RECOVERY_REASON_LENGTH = 1024;
 
 export function assertOperationLimits(input: {
   intent: JsonObject;

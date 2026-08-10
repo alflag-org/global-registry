@@ -10,6 +10,7 @@ import {
   completeOperationRoute,
   createOperationRoute,
   failOperationRoute,
+  forceCancelOperationRoute,
   getOperationRoute,
   listOperationEventsRoute,
   listOperationsRoute,
@@ -192,6 +193,18 @@ export function registerOperationRoutes(app: OpenAPIHono<ApiEnvironment>): void 
       expectedRevision: body.expectedRevision,
       lockScope: body.lockScope,
       fencingToken: body.fencingToken,
+      actorId: actor(c).id,
+    });
+    return c.json(toOperationResponse(operation), 200);
+  });
+
+  app.openapi(forceCancelOperationRoute, async (c) => {
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+    const operation = await new OperationService(repository(c)).forceCancel({
+      id,
+      expectedRevision: body.expectedRevision,
+      reason: body.reason,
       actorId: actor(c).id,
     });
     return c.json(toOperationResponse(operation), 200);

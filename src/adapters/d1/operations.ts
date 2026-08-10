@@ -2,6 +2,7 @@ import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
   CompleteOperationCommand,
+  ForceCancelOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -114,6 +115,34 @@ function completionPredicate(operationId: string): SqlPredicate {
   return {
     sql: `NOT EXISTS (${completionIssuesSql()})`,
     params: [operationId, operationId, operationId],
+  };
+}
+
+function lockSnapshotPredicate(operationId: string, locks: readonly LockRow[]): SqlPredicate {
+  const exactLocks = locks.map(
+    () => `EXISTS (
+      SELECT 1 FROM resource_locks
+      WHERE scope = ? AND operation_id = ? AND actor_id = ? AND fencing_token = ?
+        AND expires_at = ? AND created_at = ? AND updated_at = ?
+    )`,
+  );
+  return {
+    sql: ['(SELECT COUNT(*) FROM resource_locks WHERE operation_id = ?) = ?', ...exactLocks].join(
+      ' AND ',
+    ),
+    params: [
+      operationId,
+      locks.length,
+      ...locks.flatMap((lock) => [
+        lock.scope,
+        lock.operation_id,
+        lock.actor_id,
+        lock.fencing_token,
+        lock.expires_at,
+        lock.created_at,
+        lock.updated_at,
+      ]),
+    ],
   };
 }
 
@@ -675,6 +704,110 @@ export class D1Operations extends D1Client {
       ...event,
     ]);
     requireMutation(results[0], 'Operation', input.id);
+    const updated = await this.get(input.id);
+    if (updated === null) throw new NotFoundError('Operation', input.id);
+    return updated;
+  }
+
+  async forceCancel(input: ForceCancelOperationCommand): Promise<Operation> {
+    const changedAt = new Date().toISOString();
+    const locks = await this.all<LockRow>(
+      `SELECT scope, operation_id, actor_id, fencing_token, expires_at, created_at, updated_at
+       FROM resource_locks WHERE operation_id = ? ORDER BY scope`,
+      input.id,
+    );
+    const snapshot = lockSnapshotPredicate(input.id, locks);
+    const eventId = `evt_${crypto.randomUUID()}`;
+    const outboxId = `out_${crypto.randomUUID()}`;
+    const payload = ensureJsonObject(
+      {
+        from: 'running',
+        to: 'cancelled',
+        reason: input.reason,
+        ownerActorId: input.ownerActorId,
+        expectedRevision: input.expectedRevision,
+        resultingRevision: input.expectedRevision + 1,
+        lockSnapshot: locks.map((lock) => ({
+          scope: lock.scope,
+          operationId: lock.operation_id,
+          actorId: lock.actor_id,
+          fencingToken: lock.fencing_token,
+          expiresAt: lock.expires_at,
+          createdAt: lock.created_at,
+          updatedAt: lock.updated_at,
+        })),
+      },
+      'operation force-cancel event payload',
+    );
+    const serializedPayload = JSON.stringify(payload);
+    const results = await this.db.batch([
+      this.statement(
+        `UPDATE operations SET status = 'cancelled', revision = revision + 1, updated_at = ?
+         WHERE id = ? AND actor_id = ? AND revision = ? AND status = 'running'
+           AND ${snapshot.sql}`,
+        changedAt,
+        input.id,
+        input.ownerActorId,
+        input.expectedRevision,
+        ...snapshot.params,
+      ),
+      this.statement(
+        `INSERT INTO events (
+          event_id, event_type, operation_id, actor_id, payload_json, occurred_at
+        )
+        SELECT ?, 'operation.force_cancelled', ?, ?, ?, ?
+        WHERE changes() = 1
+          AND EXISTS (
+            SELECT 1 FROM operations
+            WHERE id = ? AND status = 'cancelled' AND revision = ? AND updated_at = ?
+          )
+          AND ${snapshot.sql}`,
+        eventId,
+        input.id,
+        input.actorId,
+        serializedPayload,
+        changedAt,
+        input.id,
+        input.expectedRevision + 1,
+        changedAt,
+        ...snapshot.params,
+      ),
+      this.statement(
+        `INSERT INTO outbox (id, event_id, topic, payload_json, created_at, updated_at)
+         SELECT ?, ?, 'global-registry.operation.force_cancelled', ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM events WHERE event_id = ?)`,
+        outboxId,
+        eventId,
+        serializedPayload,
+        changedAt,
+        changedAt,
+        eventId,
+      ),
+      this.statement(
+        `DELETE FROM resource_locks
+         WHERE operation_id = ? AND EXISTS (SELECT 1 FROM events WHERE event_id = ?)`,
+        input.id,
+        eventId,
+      ),
+    ]);
+    if (results[0]?.meta.changes !== 1) {
+      throw new ConflictError(
+        'operation_recovery_conflict',
+        'The operation revision, status, owner, or lock snapshot changed before force-cancel.',
+        { operationId: input.id },
+      );
+    }
+    if (
+      results[1]?.meta.changes !== 1 ||
+      results[2]?.meta.changes !== 1 ||
+      results[3]?.meta.changes !== locks.length
+    ) {
+      throw new ConflictError(
+        'operation_recovery_incomplete',
+        'Administrative force-cancel did not atomically record its audit/outbox state and release every operation lock.',
+        { operationId: input.id },
+      );
+    }
     const updated = await this.get(input.id);
     if (updated === null) throw new NotFoundError('Operation', input.id);
     return updated;

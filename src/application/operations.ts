@@ -18,7 +18,11 @@ import type {
 } from '../domain/models/global-registry';
 import type { OperationChange } from '../domain/operation/model';
 import { validateOperationChanges } from '../domain/operation/validation';
-import { assertOperationLimits, MAX_LOCK_SCOPES } from '../domain/operation/limits';
+import {
+  assertOperationLimits,
+  MAX_LOCK_SCOPES,
+  MAX_OPERATION_RECOVERY_REASON_LENGTH,
+} from '../domain/operation/limits';
 import { hashPlan } from './services/plan-hash';
 
 interface OperationResourceCommand {
@@ -107,6 +111,14 @@ export interface ChangeOperationStepCommand {
   actorId: string;
 }
 
+export interface ForceCancelOperationCommand {
+  id: string;
+  expectedRevision: number;
+  reason: string;
+  actorId: string;
+  ownerActorId: string;
+}
+
 interface OperationStore {
   getResource(key: string): Promise<Resource | null>;
   getResourceKindDefinition(
@@ -132,6 +144,7 @@ interface OperationStore {
   transition(input: TransitionResourceCommand): Promise<Resource>;
   completeOperation(input: CompleteOperationCommand): Promise<Operation>;
   updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation>;
+  forceCancelOperation(input: ForceCancelOperationCommand): Promise<Operation>;
   updateOperationStep(input: ChangeOperationStepCommand): Promise<OperationStep>;
 }
 
@@ -487,6 +500,36 @@ export class OperationService {
       );
     }
     return this.store.completeOperation(input);
+  }
+
+  async forceCancel(input: Omit<ForceCancelOperationCommand, 'ownerActorId'>): Promise<Operation> {
+    const reason = input.reason.trim();
+    if (reason.length === 0 || reason.length > MAX_OPERATION_RECOVERY_REASON_LENGTH) {
+      throw new ValidationError(
+        'operation_recovery_reason_invalid',
+        `Administrative force-cancel requires a reason of at most ${MAX_OPERATION_RECOVERY_REASON_LENGTH} characters.`,
+      );
+    }
+    const operation = await this.loadOperation(input.id);
+    if (operation.revision !== input.expectedRevision) {
+      throw new ConflictError('revision_conflict', 'Operation revision is stale.', {
+        id: input.id,
+        expectedRevision: input.expectedRevision,
+        currentRevision: operation.revision,
+      });
+    }
+    if (operation.status !== 'running') {
+      throw new ConflictError(
+        'operation_recovery_not_running',
+        'Only a running operation may be administratively force-cancelled.',
+        { operationId: operation.id, currentStatus: operation.status },
+      );
+    }
+    return this.store.forceCancelOperation({
+      ...input,
+      reason,
+      ownerActorId: operation.actorId,
+    });
   }
 
   async updateStep(input: {

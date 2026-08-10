@@ -2,6 +2,7 @@ import type {
   ChangeOperationStatusCommand,
   ChangeOperationStepCommand,
   CompleteOperationCommand,
+  ForceCancelOperationCommand,
   OperationDetail,
   PersistOperationCommand,
   TransitionResourceCommand,
@@ -368,6 +369,10 @@ export class D1GlobalRegistryRepository {
 
   async updateOperationStatus(input: ChangeOperationStatusCommand): Promise<Operation> {
     return this.operations.updateStatus(input);
+  }
+
+  async forceCancelOperation(input: ForceCancelOperationCommand): Promise<Operation> {
+    return this.operations.forceCancel(input);
   }
 
   async updateOperationStep(input: ChangeOperationStepCommand): Promise<OperationStep> {

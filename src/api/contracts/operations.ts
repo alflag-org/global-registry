@@ -17,6 +17,7 @@ import { operationChangeSchema } from '../../domain/operation/schemas';
 import {
   MAX_LOCK_SCOPES,
   MAX_OPERATION_CHANGES,
+  MAX_OPERATION_RECOVERY_REASON_LENGTH,
   MAX_OPERATION_RESOURCES,
   MAX_OPERATION_STEPS,
 } from '../../domain/operation/limits';
@@ -34,6 +35,7 @@ import {
   pageLimitSchema,
   parseResponse,
   protectedRouteMetadata,
+  revisionSchema,
 } from './common';
 import { standardErrorResponses } from './errors';
 
@@ -142,6 +144,14 @@ const updateOperationStepRequestSchema = fencingSchema
   })
   .strict()
   .openapi('UpdateOperationStepRequest');
+
+const forceCancelOperationRequestSchema = z
+  .object({
+    expectedRevision: revisionSchema,
+    reason: z.string().trim().min(1).max(MAX_OPERATION_RECOVERY_REASON_LENGTH),
+  })
+  .strict()
+  .openapi('ForceCancelOperationRequest');
 
 const operationIdParamsSchema = z
   .object({
@@ -485,6 +495,36 @@ export const cancelOperationRoute = operationStatusRoute({
   operationId: 'cancelOperation',
   summary: 'Cancel an operation',
   targetStatus: 'cancelled',
+});
+
+export const forceCancelOperationRoute = createRoute({
+  method: 'post',
+  path: '/api/v1/operations/{id}/force-cancel',
+  operationId: 'forceCancelOperation',
+  tags: ['Operations'],
+  summary: 'Administratively force-cancel an operation',
+  description:
+    'Allows an admin to cancel a running operation whose creator is unavailable. This Registry-only recovery records the reason and current lock snapshot, releases those locks, and performs no provider-side action. Continuing the work requires a new operation plan.',
+  ...protectedRouteMetadata('admin'),
+  request: {
+    params: operationIdParamsSchema,
+    body: jsonRequest(
+      forceCancelOperationRequestSchema,
+      'The expected running-operation revision and required recovery reason.',
+      {
+        expectedRevision: 2,
+        reason: 'The creator service identity is no longer available.',
+      },
+    ),
+  },
+  responses: {
+    200: jsonResponse(operationResponseSchema, 'The administratively cancelled operation.', {
+      ...operationExample,
+      status: 'cancelled',
+      revision: 3,
+    }),
+    ...standardErrorResponses(),
+  },
 });
 
 export const listOperationEventsRoute = createRoute({

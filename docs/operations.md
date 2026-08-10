@@ -69,6 +69,21 @@ Operation lock scopes are planned `resource/<key>` values. The operation creator
 
 Complete an operation with `POST /api/v1/operations/{id}/complete` only after all planned resources have reached their target lifecycle and all steps are `succeeded` or `skipped`. Planned binding replacements must match the current binding, planned removals must be absent, and planned relationship creates or removals must match current D1 state. The endpoint returns `operation_completion_incomplete` without changing the operation or writing a success event when any condition is unmet.
 
+## Operation owner recovery
+
+Use administrative force-cancel only when the creator of a running Operation can no longer use the normal owner-and-fence mutation path. An active admin sends `POST /api/v1/operations/{id}/force-cancel` with the current Operation revision and a required reason:
+
+```json
+{
+  "expectedRevision": 2,
+  "reason": "The creator service identity is no longer available."
+}
+```
+
+The Registry changes the Operation to `cancelled`, records an `operation.force_cancelled` audit event and matching outbox row, and includes the current lock scopes, owners, fencing tokens, and timestamps in the event payload. It then removes only that Operation's active lock rows. Per-scope lock generations remain, so a later grant receives a newer fencing token.
+
+This endpoint performs no provider action and does not change Resource lifecycle, Operation steps, bindings, or relationships. The cancelled Operation and its immutable plan remain terminal. If work must continue, inspect current Registry and provider state, create a new Operation Plan, and acquire fresh locks.
+
 ## Routine verification
 
 Run local verification before an operator-managed deployment:
