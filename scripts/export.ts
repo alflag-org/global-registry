@@ -25,17 +25,10 @@ if (remoteValue !== 'true' && remoteValue !== 'false') {
   throw new Error('GLOBAL_REGISTRY_REMOTE must be exactly true or false.');
 }
 const remote = remoteValue === 'true';
+const config = remote ? requiredEnvironment('GLOBAL_REGISTRY_WRANGLER_CONFIG') : 'wrangler.jsonc';
 const destination = await validateExportOutputPath(requestedOutput);
 const staging = await createExportStaging(destination);
 try {
-  if (remote) {
-    await runCommand(process.execPath, [
-      'scripts/deployment-preflight.mjs',
-      '--config',
-      'wrangler.operator.jsonc',
-    ]);
-  }
-  const config = remote ? 'wrangler.operator.jsonc' : 'wrangler.jsonc';
   const wranglerArguments = [
     'exec',
     'wrangler',
@@ -65,7 +58,9 @@ function requiredEnvironment(name: string): string {
     throw new Error(
       name === 'GLOBAL_REGISTRY_EXPORT_FILE'
         ? `Set ${name} to an explicit absolute path outside the repository; exports never choose a repository-relative default.`
-        : `Set ${name} to the configured D1 database name or binding.`,
+        : name === 'GLOBAL_REGISTRY_WRANGLER_CONFIG'
+          ? `Set ${name} to the generated Wrangler config for the selected Instance environment.`
+          : `Set ${name} to the configured D1 database name or binding.`,
     );
   }
   return value;

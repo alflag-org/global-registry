@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$" },
+    "commit": { "type": "string", "pattern": "^[a-f0-9]{40}$" }
+  },
+  "required": ["repository", "commit"],
+  "additionalProperties": false,
+  "$id": "https://global-registry.example/schemas/release.schema.json",
+  "title": "Global Registry release manifest"
+}

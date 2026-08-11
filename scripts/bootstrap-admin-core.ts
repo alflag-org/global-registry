@@ -3,6 +3,7 @@ import { actorCreateInputSchema } from '../src/domain/actor/schemas';
 
 const databaseNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
 const environmentNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const actorIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export interface BootstrapAdminOptions {
   database: string;
@@ -11,6 +12,7 @@ export interface BootstrapAdminOptions {
   remote: boolean;
   config: string;
   environment?: string;
+  actorId?: string;
 }
 
 export interface BootstrapAdminResult {
@@ -39,8 +41,9 @@ export function bootstrapAdminUsage(): string {
 Options:
   --local             Use local D1 (default).
   --remote            Use remote D1. This must be explicit.
-  --config <path>     Wrangler config (default: wrangler.jsonc locally, wrangler.operator.jsonc remotely).
+  --config <path>     Wrangler config (default: wrangler.jsonc locally; required remotely).
   --env <name>        Wrangler environment (default: development locally).
+  --actor-id <uuid>   Fixed UUID for the first admin Actor.
   -h, --help          Show this help.`;
 }
 
@@ -64,7 +67,11 @@ export function parseBootstrapAdminArguments(
       explicitMode = mode;
       continue;
     }
-    if (!['--database', '--identity', '--display-name', '--config', '--env'].includes(argument)) {
+    if (
+      !['--database', '--identity', '--display-name', '--config', '--env', '--actor-id'].includes(
+        argument,
+      )
+    ) {
       throw new Error(`Unknown argument: ${argument ?? '(missing)'}`);
     }
     if (values.has(argument)) throw new Error(`${argument} was provided more than once.`);
@@ -92,7 +99,10 @@ export function parseBootstrapAdminArguments(
   }
 
   const remote = explicitMode === 'remote';
-  const config = values.get('--config') ?? (remote ? 'wrangler.operator.jsonc' : 'wrangler.jsonc');
+  if (remote && values.get('--config') === undefined) {
+    throw new Error('--config is required when --remote is used.');
+  }
+  const config = values.get('--config') ?? 'wrangler.jsonc';
   if (
     config.length === 0 ||
     config.length > 512 ||
@@ -108,6 +118,11 @@ export function parseBootstrapAdminArguments(
     throw new Error('--env must be a stable environment identifier.');
   }
 
+  const actorId = values.get('--actor-id');
+  if (actorId !== undefined && !actorIdPattern.test(actorId)) {
+    throw new Error('--actor-id must be a canonical lowercase UUID v4.');
+  }
+
   return {
     database,
     identity: actor.data.identity,
@@ -115,6 +130,7 @@ export function parseBootstrapAdminArguments(
     remote,
     config,
     ...(environment === undefined ? {} : { environment }),
+    ...(actorId === undefined ? {} : { actorId }),
   };
 }
 

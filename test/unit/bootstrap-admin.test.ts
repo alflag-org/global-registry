@@ -27,10 +27,12 @@ describe('bootstrap-admin CLI', () => {
     });
   });
 
-  it('requires an explicit remote mode and selects the operator config', () => {
+  it('requires an explicit remote mode and generated config', () => {
     expect(
       parseBootstrapAdminArguments([
         '--remote',
+        '--config',
+        'generated-wrangler.json',
         '--database',
         'registry-production',
         '--identity',
@@ -43,8 +45,35 @@ describe('bootstrap-admin CLI', () => {
       identity: 'service:bootstrap-admin',
       displayName: 'Bootstrap Administrator',
       remote: true,
-      config: 'wrangler.operator.jsonc',
+      config: 'generated-wrangler.json',
     });
+  });
+
+  it('accepts a canonical fixed actor ID for manifest-aligned bootstrap', () => {
+    expect(
+      parseBootstrapAdminArguments([
+        '--database',
+        'DB',
+        '--identity',
+        'access:first-admin',
+        '--display-name',
+        'Registry Administrator',
+        '--actor-id',
+        '00000000-0000-4000-8000-000000000001',
+      ]),
+    ).toMatchObject({ actorId: '00000000-0000-4000-8000-000000000001' });
+    expect(() =>
+      parseBootstrapAdminArguments([
+        '--database',
+        'DB',
+        '--identity',
+        'access:first-admin',
+        '--display-name',
+        'Registry Administrator',
+        '--actor-id',
+        'not-a-uuid',
+      ]),
+    ).toThrow('canonical lowercase UUID v4');
   });
 
   it('rejects ambiguous modes, unsafe paths, and non-canonical identities', () => {

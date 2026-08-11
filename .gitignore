@@ -1,6 +1,5 @@
 node_modules/
 .wrangler/
-wrangler.operator.jsonc
 .work/
 dist/
 build/

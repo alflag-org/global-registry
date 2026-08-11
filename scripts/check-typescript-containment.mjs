@@ -4,7 +4,7 @@ import { lstat, readdir, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { findDomainBoundaryViolations } from './check-domain-boundary.mjs';
 import { findTestClassificationViolations } from './check-test-classification.mjs';
-import { parseJsonc } from './deployment-preflight.mjs';
+import { parseJsonc } from './jsonc.mjs';
 import {
   allRegularFiles,
   checkedRoot,
@@ -269,11 +269,7 @@ async function validateWranglerRedirectState(repositoryRoot, violations) {
   }
 
   const redirectedPath = path.resolve(path.dirname(redirectPath), redirectedConfig);
-  const allowedNames = new Set([
-    'wrangler.jsonc',
-    'wrangler.operator.jsonc',
-    'wrangler.operator.example.jsonc',
-  ]);
+  const allowedNames = new Set(['wrangler.jsonc']);
   if (
     !isPathContained(repositoryRoot, redirectedPath) ||
     !allowedNames.has(path.basename(redirectedPath))

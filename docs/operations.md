@@ -2,13 +2,14 @@
 
 ## Access and Actor administration
 
-Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Apply all pending migrations, then run the operator-only CLI against the configured remote D1 database:
+Production registry use requires a valid Cloudflare Access JWT mapped to an active Actor. The first Actor must be an active admin. Apply migrations through the private Instance Repository, generate the matching Wrangler configuration, and run the bootstrap CLI with the fixed UUID recorded as `operations.backupActorId`:
 
 ```sh
 mise run bootstrap-admin -- \
   --remote \
-  --database DB \
-  --config wrangler.operator.jsonc \
+  --database <manifest-database-name> \
+  --config <generated-wrangler-config> \
+  --actor-id <manifest-backup-actor-uuid> \
   --identity access:<sub> \
   --display-name "Registry Administrator"
 ```
@@ -45,7 +46,7 @@ Scheduled maintenance requires an operator-owned Cron Trigger, an active-admin `
 
 ## SQL exports
 
-To create a raw SQL export, set the configured D1 database name or binding and an absolute output path outside the worktree. The destination must be a new regular file; the exporter refuses overwrite, symlink, and special-file destinations.
+To create a raw SQL export, set the configured D1 database name or binding and an absolute output path outside the worktree. For a remote export, also set `GLOBAL_REGISTRY_REMOTE=true` and `GLOBAL_REGISTRY_WRANGLER_CONFIG` to a generated Wrangler configuration for the same Instance environment. The destination must be a new regular file; the exporter refuses overwrite, symlink, and special-file destinations.
 
 ```sh
 GLOBAL_REGISTRY_DATABASE=DB \
@@ -63,7 +64,7 @@ Validation rejects malformed, unsupported, or filesystem-capable SQL and checks 
 
 ## Queue, outbox, and locks
 
-Outbox delivery is at-least-once. A dispatcher leases at most 100 pending rows and sends each Queue message with its dispatch token. Producer sends have at most three attempts total: the initial attempt plus at most two retries. The third failure terminalizes the D1 outbox row without consuming consumer deliveries. Consumer claim, completion, and release require the current token. Duplicate or stale deliveries are acknowledged. A busy or failed current claim is retried. The operator template allows five Queue retries after the initial delivery and uses a five-minute visibility lease; persistent failures follow the configured dead-letter policy.
+Outbox delivery is at-least-once. A dispatcher leases at most 100 pending rows and sends each Queue message with its dispatch token. Producer sends have at most three attempts total: the initial attempt plus at most two retries. The third failure terminalizes the D1 outbox row without consuming consumer deliveries. Consumer claim, completion, and release require the current token. Duplicate or stale deliveries are acknowledged. A busy or failed current claim is retried. The generated deployment configuration allows five Queue retries after the initial delivery and uses a five-minute visibility lease; persistent failures follow the configured dead-letter policy.
 
 Operation lock scopes are planned `resource/<key>` values. The operation creator and Actor own the lease. The lease must be current and must carry a fencing token. Fencing generations remain after release and advance on grant, renewal, expiry recovery, or reacquisition. A delayed token cannot mutate state after a newer lease. Validate real D1 concurrency in the deployed environment.
 
@@ -94,4 +95,4 @@ mise run smoke
 mise run deploy-dry-run-local
 ```
 
-Use [Deployment](deployment.md) for the operator overlay, preflight, remote migration, deployment, and deployed acceptance checks.
+Use [Deployment](deployment.md) for the Product manifest contract, Instance workflow sequence, migration compatibility guard, bootstrap, and deployed acceptance checks.

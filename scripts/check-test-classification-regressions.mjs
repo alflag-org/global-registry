@@ -139,10 +139,19 @@ try {
     recursive: true,
   });
   await mkdir(path.join(temporaryRoot, 'scripts'));
-  await cp(
-    path.join(repositoryRoot, 'scripts/bootstrap-admin-core.ts'),
-    path.join(temporaryRoot, 'scripts/bootstrap-admin-core.ts'),
-  );
+  for (const fileName of [
+    'bootstrap-admin-core.ts',
+    'deployment-manifests.ts',
+    'deployment-migrations.ts',
+    'deployment-wrangler.ts',
+    'jsonc.mjs',
+    'jsonc.d.mts',
+  ]) {
+    await cp(
+      path.join(repositoryRoot, 'scripts', fileName),
+      path.join(temporaryRoot, 'scripts', fileName),
+    );
+  }
   await cp(path.join(repositoryRoot, 'migrations'), path.join(temporaryRoot, 'migrations'), {
     recursive: true,
   });
@@ -159,12 +168,12 @@ try {
     throw new Error(`Exact test configuration was rejected: ${positive.violations.join('; ')}`);
   }
   if (
-    positive.effectiveUnitFiles.length !== 16 ||
+    positive.effectiveUnitFiles.length !== 17 ||
     positive.effectiveWorkerFiles.length !== 11 ||
     !positive.nodeConfigIsWorkerFree
   ) {
     throw new Error(
-      `Positive classification fixture did not produce the exact 16/11 Worker-free partition with all supported extensions: violations=${positive.violations.join('; ')}, unit=${positive.effectiveUnitFiles.length}, worker=${positive.effectiveWorkerFiles.length}, workerFree=${positive.nodeConfigIsWorkerFree}.`,
+      `Positive classification fixture did not produce the exact 17/11 Worker-free partition with all supported extensions: violations=${positive.violations.join('; ')}, unit=${positive.effectiveUnitFiles.length}, worker=${positive.effectiveWorkerFiles.length}, workerFree=${positive.nodeConfigIsWorkerFree}.`,
     );
   }
 
@@ -184,7 +193,7 @@ try {
 }
 
 globalThis.console.log(
-  `Test classification regression fixtures passed: exact 16/11 extension-aware partition accepted; 4 Node and 4 Worker extension-selection files were intentionally executed and failed; ${cases.length} configuration and import-graph cases rejected before execution.`,
+  `Test classification regression fixtures passed: exact 17/11 extension-aware partition accepted; 4 Node and 4 Worker extension-selection files were intentionally executed and failed; ${cases.length} configuration and import-graph cases rejected before execution.`,
 );
 
 function replaceIncludes(source, entries) {

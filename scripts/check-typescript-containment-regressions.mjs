@@ -38,7 +38,7 @@ const commandScripts = [
   'check',
   'check:migrations',
   'check:openapi',
-  'check:deployment-preflight',
+  'check:deployment',
   'check:validate-export',
   'check:local-auth',
   'check:domain-boundary',
@@ -49,13 +49,11 @@ const commandScripts = [
   'smoke:local',
   'export:sql',
   'validate:sql-export',
-  'deploy:preflight',
   'deploy:dry-run',
   'deploy:dry-run:local',
-  'deploy',
+  'deployment',
   'startup:check',
   'db:migrate:local',
-  'db:migrate:remote',
   'lint',
   'format:check',
   'build',
@@ -119,7 +117,6 @@ async function copyRepositoryFixture(targetRoot) {
     'vitest.config.ts',
     'vitest.unit.config.ts',
     'wrangler.jsonc',
-    'wrangler.operator.example.jsonc',
   ]) {
     await cp(path.join(repositoryRoot, file), path.join(targetRoot, file));
   }

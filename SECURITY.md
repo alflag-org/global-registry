@@ -2,9 +2,17 @@
 
 ## Supported boundary
 
-Production is designed to run behind Cloudflare Access. The shared configuration has unset deployment values, disables workers.dev and preview exposure, and fails closed until an operator supplies the Access team domain, audience, D1/R2/Queue identifiers, scheduled maintenance, and an active Actor mapping. Provider credential values are outside this registry; the application stores only uppercase credential references.
+Production is designed to run behind Cloudflare Access. The Product repository keeps its
+committed Wrangler configuration inert, with deployment values unset and workers.dev and
+preview exposure disabled. The private Instance repository supplies the Access team domain,
+audience, D1/R2/Queue references, scheduled maintenance, and active Actor mapping through the
+strict deployment manifest. Provider credential values are outside this registry; the
+application stores only uppercase credential references.
 
-The production overlay must keep `ENVIRONMENT=production` and `ALLOW_LOCAL_AUTH=false`. Do not place credentials, private keys, Access assertions, raw production exports, or personal data in source, configuration, logs, fixtures, issues, or documentation.
+Generated deployment configuration must keep `ENVIRONMENT` equal to the selected environment,
+`ALLOW_LOCAL_AUTH=false`, `workers_dev=false`, and `preview_urls=false`. Do not place
+credentials, private keys, Access assertions, raw production exports, or personal data in
+source, configuration, logs, fixtures, issues, or documentation.
 
 ## Authentication and authorization
 

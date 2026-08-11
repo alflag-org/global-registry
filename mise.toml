@@ -25,10 +25,6 @@ run = "pnpm dev"
 description = "Apply D1 migrations to the local database"
 run = "pnpm db:migrate:local"
 
-[tasks.migrate-remote]
-description = "Apply D1 migrations to the configured remote database"
-run = "pnpm db:migrate:remote"
-
 [tasks.bootstrap-admin]
 description = "Create the first active admin Actor in D1"
 run = "pnpm bootstrap:admin"
@@ -42,12 +38,8 @@ description = "Export an explicitly selected database as SQL"
 run = "pnpm export:sql"
 
 [tasks.deploy-dry-run]
-description = "Validate the Worker deployment without publishing it"
+description = "Validate the Product deployment example without publishing it"
 run = "pnpm deploy:dry-run"
-
-[tasks.deploy]
-description = "Deploy the configured Worker after operator review"
-run = "pnpm deploy"
 
 [tasks.deploy-dry-run-local]
 description = "Build an inert local deployment bundle without Cloudflare resources"
