@@ -1,6 +1,6 @@
 # Contributing
 
-Keep changes focused. Preserve the provider-neutral boundary. Do not commit `.dev.vars`, `wrangler.operator.jsonc`, generated Worker declarations, local Wrangler state, SQL exports, credentials, or target-environment identifiers.
+Keep changes focused. Preserve the provider-neutral boundary. Do not commit `.dev.vars`, generated Worker declarations, local Wrangler state, SQL exports, credentials, or target-environment identifiers.
 
 ## Setup and development
 
@@ -25,7 +25,13 @@ The implementation uses one path: `route -> application -> domain -> port -> ada
 - `src/adapters/` owns Access, D1, R2, and Queue integrations.
 - `migrations/` contains forward-only D1 migrations in sequence order.
 
-Route schemas are the source for the runtime-generated OpenAPI document. Do not add a separate hand-maintained API specification. When changing routes, schemas, authorization, lifecycle transitions, exports, or operator procedures, update the implementation, focused tests, and the relevant public document.
+Route schemas are the source for the runtime-generated OpenAPI document. Do not add a separate hand-maintained API specification. When changing routes, schemas, authorization, lifecycle transitions, exports, or deployment procedures, update the implementation, focused tests, and the relevant public document.
+
+This repository is the Product Repository. Keep deployment schemas, validation, Wrangler
+configuration generation, migration compatibility, and CLI behavior here. Environment
+release pins and real resource references belong in the private Instance Repository; do not
+copy Product source or schemas there, and do not add target values here. Do not add
+`runtime.json`: Global Registry has no runtime configuration API.
 
 Provider credential values must not appear in source, fixtures, logs, exports, issues, or documentation. Use uppercase credential references only. Authoritative resources and operations are not hard-deleted; use the lifecycle or status transitions provided by the API.
 
@@ -50,7 +56,7 @@ pnpm check:local-auth
 pnpm test -- bootstrap-admin
 ```
 
-Run `pnpm browser:install` before the local-auth check when the locked browser is not installed. The deployment dry run uses the inert shared configuration and does not publish a Worker.
+Run `pnpm browser:install` before the local-auth check when the locked browser is not installed. The deployment dry run uses either the inert local configuration or the sandbox manifest example and does not publish a Worker.
 
 Pull-request CI runs the canonical checks, a fresh-D1 smoke test, the inert deployment dry run, and `git diff --check`. The separate Security workflow runs dependency advisory and registry-signature checks plus a Trivy repository scan on every `master` push, on manual dispatch, and each Monday at 03:23 UTC.
 

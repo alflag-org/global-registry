@@ -23,7 +23,7 @@ export async function bootstrapAdmin(
   options: BootstrapAdminOptions,
 ): Promise<BootstrapAdminResult> {
   const values = {
-    actorId: randomUUID(),
+    actorId: options.actorId ?? randomUUID(),
     identity: options.identity,
     displayName: options.displayName,
     createdAt: new Date().toISOString(),

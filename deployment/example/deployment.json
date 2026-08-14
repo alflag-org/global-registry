@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "accountId": "00000000000000000000000000000001",
+  "environment": "staging",
+  "worker": {
+    "name": "global-registry-sandbox",
+    "baseUrl": "https://registry.sandbox.test",
+    "routes": [
+      {
+        "pattern": "registry.sandbox.test",
+        "customDomain": true
+      }
+    ]
+  },
+  "resources": {
+    "database": {
+      "name": "global-registry-sandbox-db",
+      "id": "00000000-0000-4000-8000-000000000001"
+    },
+    "exportsBucket": "global-registry-sandbox-exports",
+    "outboxQueue": "global-registry-sandbox-events",
+    "deadLetterQueue": "global-registry-sandbox-dead-letter"
+  },
+  "access": {
+    "teamDomain": "sandbox.cloudflareaccess.com",
+    "audience": "sandbox-access-audience-0001"
+  },
+  "operations": {
+    "backupActorId": "00000000-0000-4000-8000-000000000002"
+  },
+  "observability": {
+    "logsHeadSamplingRate": 1,
+    "tracesEnabled": false
+  },
+  "crons": ["0 3 * * *"]
+}

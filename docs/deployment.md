@@ -1,43 +1,105 @@
-# Deployment
+# Deployment contract
 
-Global Registry runs as a Cloudflare Worker with one D1 database, one R2 bucket, one primary Queue, one dead-letter Queue, and an operator-owned Cron Trigger. The committed `wrangler.jsonc` is an inert shared configuration: deployment values are unset, workers.dev and preview URLs are disabled, and storage names are local simulation values.
+Global Registry is the Product Repository. It contains the Worker source, D1 migration
+chain, deployment manifest schemas, validator, Wrangler configuration generator, and
+deployment CLI. It does not contain an environment's account ID, resource IDs, Access
+audience, hostname, or credential values.
 
-## Operator overlay
+The private Instance Repository contains one `release.json` and one `deployment.json` for
+each environment. It selects an immutable Product commit and records the desired state for
+that environment. Its workflows call this repository's CLI; they do not reimplement
+deployment logic and do not copy Product source or schemas.
 
-Create the ignored `wrangler.operator.jsonc` from `wrangler.operator.example.jsonc`. Replace every operator placeholder with values for the target environment:
+There is no `runtime.json`. Global Registry has no runtime configuration API, so the
+Instance Repository manages runtime desired state directly through the deployment manifest.
 
-- Worker name and Cloudflare account ID;
-- HTTPS Cloudflare Access team domain and application audience;
-- an active admin Actor ID in `BACKUP_ACTOR_ID`;
-- D1 database name and ID;
-- R2 bucket name;
-- the primary Queue and dead-letter Queue names; and
-- at least one operator-owned Cron Trigger.
+## Manifest contract
 
-Keep `ENVIRONMENT=production`, `ALLOW_LOCAL_AUTH=false`, `workers_dev=false`, and `preview_urls=false`. Do not put provider credential values or unrelated secrets in the overlay. The overlay is ignored and must not be committed.
+`release.json` is strict JSON with these fields:
 
-## Preflight and deployment sequence
+- `repository`: the Product repository in `owner/name` form;
+- `commit`: a full, lowercase, 40-character Git commit SHA.
 
-The remote commands are gated by the deployment preflight. Run them in this order after completing the overlay:
+`deployment.json` is strict JSON with `schemaVersion: 1` and these groups:
+
+- `accountId` and `environment`;
+- `worker.name`, `worker.baseUrl`, and `worker.routes`;
+- D1, R2, primary Queue, and dead-letter Queue references;
+- Cloudflare Access `teamDomain` and `audience`;
+- `operations.backupActorId`;
+- optional observability overrides; and
+- one or more Cron expressions.
+
+The generated JSON Schemas are in [`deployment/schemas/`](../deployment/schemas/). The
+validated example is in [`deployment/example/`](../deployment/example/); it contains only
+sandbox values and is not a deployment target.
+
+## Product CLI
+
+Run the CLI from an immutable Product checkout. The Instance workflow supplies the manifest
+directory and, where appropriate, the expected Product repository and commit:
 
 ```sh
-pnpm deploy:preflight
-pnpm deploy:dry-run
-pnpm db:migrate:remote
-pnpm deploy
+pnpm deployment validate \
+  --directory /path/to/environments/staging \
+  --expected-environment staging \
+  --source-repository owner/product \
+  --source-commit <full-product-sha>
+
+pnpm deployment generate \
+  --directory /path/to/environments/staging \
+  --output .work/wrangler.json
+
+pnpm deployment dry-run --directory /path/to/environments/staging
+pnpm deployment publish --directory /path/to/environments/staging
+pnpm deployment deploy --directory /path/to/environments/staging
 ```
 
-`pnpm deploy:preflight` validates the operator configuration, binding names, production authentication settings, disabled public exposure, required resource identifiers, Queue recovery settings, and Cron Trigger. `pnpm deploy:dry-run` builds the Worker without publishing it. `pnpm db:migrate:remote` applies every pending file in `migrations/` through the Wrangler/D1 migration ledger. `pnpm deploy` publishes the Worker after running its preflight guard again.
+`generate` starts with the inert committed `wrangler.jsonc` and creates a temporary
+configuration. It fills the account, Worker, route, Access, storage, Queue, observability,
+Cron, and backup Actor values from the manifest. It always sets `workers_dev=false` and
+`preview_urls=false`, removes shared environment overrides, and invokes Wrangler with
+resource auto-creation disabled. The generated file is local execution state and must not
+be committed.
 
-Before applying a remote migration, confirm the dry-run bundle and target account, create a raw D1 SQL export, and validate that export. The command order above is for additive migrations compatible with the deployed Worker. Split a destructive schema change across releases: expand the schema, deploy compatible code, migrate data in bounded work, then contract the schema only after the old Worker shape is no longer in use. Do not use direct unguarded Wrangler commands for the remote migration or deployment.
+`validate` checks the two manifests and release pin. `dry-run` builds the generated Worker
+without uploading it. `publish` performs the dry run, checks the remote D1 migration ledger,
+and publishes the Worker. `deploy` performs the same steps and then applies the Product
+migrations to D1. Neither command creates or deletes Cloudflare resources, Access
+applications, DNS records, or GitHub environment protection.
 
-## Operator acceptance
+Before a remote publish or deploy, the CLI compares the remote D1 migration names with the
+Product migration chain. An unknown remote migration stops the command before the Worker is
+published. The CLI never performs an automatic rollback; restore the Instance release pin to
+a known-good Product commit only after confirming migration compatibility.
 
-After the migration and deployment:
+## Bootstrap and acceptance
 
-1. Create the first active admin with `mise run bootstrap-admin -- --remote --database DB --config wrangler.operator.jsonc --identity access:<sub> --display-name "Registry Administrator"`. Use `service:<common_name>` for a service identity.
-2. Confirm Cloudflare Access protects the registry API, `/healthz`, `/openapi.json`, `/docs`, and the main UI.
-3. Confirm the active `BACKUP_ACTOR_ID` can run scheduled maintenance.
-4. Exercise the deployed Access session and cookie policy, D1 concurrency, and Queue/R2 partial-failure recovery.
+After the first migration of a fresh environment, bootstrap the first admin with the same
+fixed UUID recorded as `operations.backupActorId`:
 
-These are deployment acceptance checks. Local validation does not prove the target Access cookie behavior, Cloudflare scheduling, or service concurrency and partial-failure behavior.
+```sh
+mise run bootstrap-admin -- \
+  --remote \
+  --database <manifest-database-name> \
+  --config <generated-wrangler-config> \
+  --actor-id <manifest-backup-actor-uuid> \
+  --identity access:<subject> \
+  --display-name "Registry Administrator"
+```
+
+Use `service:<common_name>` for a service identity. The CLI refuses a second active admin
+bootstrap and verifies the admin row, audit event, and outbox row. The generated config and
+the manifest must come from the same Instance commit.
+
+Staging acceptance must cover composition, the fresh migration chain, Access protection,
+Queue and dead-letter handling, R2 writes, Cron execution, health and API routes, and the
+UI. Promote production through an Instance release-pin pull request only after those checks
+pass. Record the Product commit, Instance commit, environment, and Worker result in the
+deployment summary.
+
+## Local development
+
+The committed `wrangler.jsonc` remains an inert local-development configuration. Use the
+local migration and development commands from the README. `pnpm deploy:dry-run:local` only
+builds the local development configuration; it does not select or publish an environment.
