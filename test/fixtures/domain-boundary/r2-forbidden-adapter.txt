@@ -1,3 +1,0 @@
-import { D1GlobalRegistryRepository } from '../d1/repository';
-
-export const forbiddenAdapterFixture = D1GlobalRegistryRepository;

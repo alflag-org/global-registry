@@ -1,3 +1,0 @@
-import { WorkerEntrypoint } from 'cloudflare:workers';
-
-export const validPlatformFixture = WorkerEntrypoint;

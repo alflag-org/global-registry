@@ -25,26 +25,10 @@ run = "pnpm dev"
 description = "Apply D1 migrations to the local database"
 run = "pnpm db:migrate:local"
 
-[tasks.bootstrap-admin]
-description = "Create the first active admin Actor in D1"
-run = "pnpm bootstrap:admin"
-
 [tasks.smoke]
-description = "Validate a fresh local D1 database"
+description = "Exercise local UI and API workflows"
 run = "pnpm smoke:local"
-
-[tasks.export-sql]
-description = "Export an explicitly selected database as SQL"
-run = "pnpm export:sql"
-
-[tasks.deploy-dry-run]
-description = "Validate the Product deployment example without publishing it"
-run = "pnpm deploy:dry-run"
 
 [tasks.deploy-dry-run-local]
 description = "Build an inert local deployment bundle without Cloudflare resources"
 run = "pnpm deploy:dry-run:local"
-
-[tasks.startup-check]
-description = "Profile local Worker startup"
-run = "pnpm startup:check"
