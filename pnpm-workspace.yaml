@@ -4,3 +4,5 @@ allowBuilds:
   workerd: true
 overrides:
   undici: 7.29.0
+  # The Workers test pool pins Miniflare releases that still depend on older sharp.
+  miniflare>sharp: 0.35.4
