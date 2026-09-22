@@ -1,7 +1,7 @@
 import type { z } from '@hono/zod-openapi';
 import type { allocationInput } from '../api/schemas';
 import { conflict, databaseError } from '../api/errors';
-import { getPrefix, ipColumns } from '../db/queries';
+import { entities, getEntity } from '../db/queries';
 import { auditStatement, snapshot, assertChanged } from '../db/mutations';
 import type { Row } from '../db/types';
 import { reference } from '../db/relationships';
@@ -14,7 +14,7 @@ export async function allocate(
 ) {
   if (input.interface_id) await reference(db, 'interfaces', input.interface_id);
   for (let attempt = 0; attempt < 5; attempt++) {
-    const parent = await getPrefix(db, prefixId);
+    const parent = await getEntity(entities.prefixes, db, prefixId);
     const p = prefix(String(parent.cidr));
     const [used, children] = await db.batch<Record<string, string>>([
       db
@@ -51,7 +51,7 @@ export async function allocate(
             `INSERT INTO ip_addresses (id,prefix_id,interface_id,address,status,dns_name,description,created_at,updated_at,family,address_key)
      SELECT ?,?,?,?,'assigned',?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM prefixes WHERE id=? AND cidr=?)
      AND NOT EXISTS (SELECT 1 FROM prefixes WHERE family=? AND prefix_length>? AND range_start>=? AND range_end<=? AND ? BETWEEN range_start AND range_end)
-     RETURNING ${ipColumns.join(',')}`,
+     RETURNING ${entities.ip_addresses.columns.join(',')}`,
           )
           .bind(
             id,
@@ -77,10 +77,10 @@ export async function allocate(
           actor,
           'allocate',
           'ip_addresses',
-          ipColumns,
+          entities.ip_addresses.columns,
           'id=?',
           [id],
-          snapshot(ipColumns),
+          snapshot(entities.ip_addresses.columns),
         ),
       ]);
       assertChanged(results[0]!.meta.changes);
