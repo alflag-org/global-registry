@@ -21,7 +21,7 @@ Set production variables:
 - `LOCAL_AUTH_SECRET = "unset"`
 - `LOCAL_ACTOR_IDENTITY = "unset"`
 
-Apply the fresh migration, inspect the deployment bundle, then deploy using the private configuration:
+Apply all pending migrations, inspect the deployment bundle, then deploy using the private configuration:
 
 ```sh
 pnpm exec wrangler d1 migrations apply DB --remote --config /absolute/private/wrangler.jsonc
@@ -47,3 +47,5 @@ curl --fail-with-body \
 ```
 
 Consult Cloudflare's [application token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/) and [Service Token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/) for Access policy setup and token handling.
+
+When upgrading an inventory database, apply all pending migrations before serving the updated Worker. Migration `0002_source_identifiers.sql` rejects existing noncanonical source values instead of silently rewriting identities. Correct them through the authenticated API first, resolving any duplicate triples, so changes remain audited.

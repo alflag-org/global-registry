@@ -16,7 +16,7 @@ The model has eight tables: `locations`, `devices`, `virtual_machines`, `interfa
 
 Devices represent physical equipment with a non-empty role string, such as server, router, switch, storage, or appliance. There is no separate role registry. VMs are independent identities with nullable host Device references. VM location is derived through the host. Interfaces require exactly one owner, enforced by a SQL check, and names are unique within each owner.
 
-External source triples are complete or entirely null and unique per Device/VM table. A VLAN VID is unique within a Location and ranges from 1 to 4094. Composite foreign keys enforce that a Prefix and its VLAN share a Location, including when either is edited.
+The `source` identifier is lowercase ASCII (`[a-z0-9][a-z0-9._-]*`), while external scopes and IDs retain their case. Database triggers enforce the canonical source format. External source triples are complete or entirely null and unique per Device/VM table. A VLAN VID is unique within a Location and ranges from 1 to 4094. Composite foreign keys enforce that a Prefix and its VLAN share a Location, including when either is edited.
 
 IP/CIDR parsing uses `ipaddr.js`. IPv4 input requires four decimal octets. IPv6 is compressed and lowercased; zone identifiers are rejected. IPv4-mapped IPv6 literals normalize to IPv4 to avoid duplicate identities; mapped CIDRs require a length of at least 96 and normalize to the equivalent IPv4 network. Prefixes clear host bits before storage. IPv4 and IPv6 otherwise remain separate families.
 

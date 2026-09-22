@@ -13,7 +13,7 @@ Cloudflare Access protects a single Worker serving the UI and REST API. D1 store
 - An Interface belongs to exactly one Device or Virtual Machine. It may have multiple IP addresses.
 - A Prefix contains registered IP addresses. VLAN association is optional and must use the same Location.
 - An IP address is either `assigned` or `reserved`. An absent address is free. Interface association is optional for both statuses.
-- Devices and VMs can carry an external identity: `source`, `source_scope`, and `source_id`. Set all three or none. The triple is unique within each entity type. These values identify external objects; they do not configure integrations.
+- Devices and VMs can carry an external identity: `source`, `source_scope`, and `source_id`. Set all three or none. `source` is trimmed and lowercased and must match `[a-z0-9][a-z0-9._-]*`; `source_scope` and `source_id` retain their case. The triple is unique within each entity type. These values identify external objects; they do not configure integrations.
 
 The UI provides lists, search, filters, create/edit/delete forms, related detail views, allocation, and audit browsing. The API is at `/api/v1`, its generated OpenAPI document at `/openapi.json`, and its reference page at `/docs`. All production routes require Access authentication.
 
@@ -48,6 +48,6 @@ pnpm deploy:dry-run:local
 
 ## Deployment and recovery
 
-Use a **fresh D1 database** and `migrations/0001_initial.sql`. This schema does not upgrade a previous Global Registry installation. No inventory data is seeded. Do not apply it over an older schema or edit D1's migration ledger to disguise an old database as a fresh one.
+Use a **fresh D1 database** and apply all migrations in order. This schema does not upgrade a previous Global Registry installation. No inventory data is seeded. Do not apply it over an older schema or edit D1's migration ledger to disguise an old database as a fresh one.
 
 See [Deployment](docs/deployment.md) for Access, Service Tokens, and Worker configuration; [Operations](docs/operations.md) for D1 export and recovery; and [Architecture](docs/architecture.md) for invariants and transaction behavior.

@@ -86,13 +86,27 @@ app.doc31('/openapi.json', {
     description:
       'Infrastructure inventory and IPAM. All routes require a verified Cloudflare Access application JWT. Service clients authenticate to Access with Service Token headers.',
   },
-  security: [{ AccessJWT: [] }],
+  security: [{ AccessClientId: [], AccessClientSecret: [] }, { AccessSession: [] }],
 });
-app.openAPIRegistry.registerComponent('securitySchemes', 'AccessJWT', {
+app.openAPIRegistry.registerComponent('securitySchemes', 'AccessClientId', {
   type: 'apiKey',
   in: 'header',
-  name: 'Cf-Access-Jwt-Assertion',
-  description: 'Injected by Cloudflare Access after human or Service Token authentication.',
+  name: 'CF-Access-Client-Id',
+  description:
+    'Service Token client ID sent to the Access gateway together with CF-Access-Client-Secret.',
+});
+app.openAPIRegistry.registerComponent('securitySchemes', 'AccessClientSecret', {
+  type: 'apiKey',
+  in: 'header',
+  name: 'CF-Access-Client-Secret',
+  description: 'Service Token secret sent to the Access gateway together with CF-Access-Client-Id.',
+});
+app.openAPIRegistry.registerComponent('securitySchemes', 'AccessSession', {
+  type: 'apiKey',
+  in: 'cookie',
+  name: 'CF_Authorization',
+  description:
+    'Browser session established by signing in through Cloudflare Access. Access injects the origin-facing Cf-Access-Jwt-Assertion header; clients do not generate that header.',
 });
 app.get('/assets/app.js', (c) =>
   c.body(client, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }),

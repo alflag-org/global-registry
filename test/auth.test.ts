@@ -61,8 +61,9 @@ async function signer() {
   );
   return {
     settings,
-    async token(claims: Record<string, unknown> = {}) {
-      const head = b64(JSON.stringify({ alg: 'RS256', kid }));
+    jwk: { ...jwk, kid, alg: 'RS256' },
+    async token(claims: Record<string, unknown> = {}, header: Record<string, unknown> = {}) {
+      const head = b64(JSON.stringify({ alg: 'RS256', kid, ...header }));
       const body = b64(
         JSON.stringify({
           aud: ['registry-audience'],
@@ -105,6 +106,8 @@ it('rejects expired, premature, wrong-audience, wrong-issuer, identity-less and 
   const { settings, token } = await signer();
   for (const claims of [
     { exp: 0 },
+    { exp: undefined },
+    { nbf: 'invalid' },
     { nbf: Math.floor(Date.now() / 1000) + 1000 },
     { aud: ['other'] },
     { iss: 'https://evil.example' },
@@ -161,4 +164,31 @@ it('uses verified service identity in mutation audit and rejects production bypa
   expect(audit?.actor).toBe('service:automation.access');
   const denied = await app.fetch(req(), { ...env, ...settings, ALLOW_LOCAL_AUTH: 'true' });
   expect(denied.status).toBe(503);
+});
+
+it('fails closed when the signing key service is unavailable', async () => {
+  const { settings, token } = await signer();
+  vi.mocked(fetch).mockResolvedValue(new Response('unavailable', { status: 503 }));
+  const response = await app.fetch(req({ 'Cf-Access-Jwt-Assertion': await token() }), {
+    ...env,
+    ...settings,
+  });
+  expect(response.status).toBe(503);
+});
+
+it('caches keys, rejects unsupported algorithms and refreshes rotated keys after cooldown', async () => {
+  const { settings, token, jwk } = await signer();
+  const authenticate = async (jwt: string) =>
+    authenticateAccessPrincipal(req({ 'Cf-Access-Jwt-Assertion': jwt }), settings);
+  await authenticate(await token());
+  await authenticate(await token());
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await expect(authenticate(await token({}, { alg: 'HS256' }))).rejects.toThrow();
+  const rotated = await token({}, { kid: 'rotated-key' });
+  vi.mocked(fetch).mockResolvedValue(Response.json({ keys: [{ ...jwk, kid: 'rotated-key' }] }));
+  await expect(authenticate(rotated)).rejects.toThrow();
+  const now = Date.now();
+  vi.spyOn(Date, 'now').mockReturnValue(now + 31_000);
+  expect((await authenticate(rotated)).identity).toBe('access:human-subject');
+  expect(fetch).toHaveBeenCalledTimes(2);
 });
