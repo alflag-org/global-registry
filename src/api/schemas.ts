@@ -5,8 +5,9 @@ const id = z.uuid();
 const text = z.string().max(4000).nullable().optional();
 const reference = id.nullable().optional();
 const positive = z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional();
+const sourceName = name.toLowerCase().regex(/^[a-z0-9][a-z0-9._-]*$/);
 const source = {
-  source: name.nullable().optional(),
+  source: sourceName.nullable().optional(),
   source_scope: name.nullable().optional(),
   source_id: name.nullable().optional(),
 };
@@ -187,7 +188,7 @@ export const deviceQuery = z
   .object({
     ...pagination,
     location_id: id.optional(),
-    source: name.optional(),
+    source: sourceName.optional(),
     source_scope: name.optional(),
   })
   .strict();
@@ -196,7 +197,7 @@ export const vmQuery = z
     ...pagination,
     location_id: id.optional(),
     host_device_id: id.optional(),
-    source: name.optional(),
+    source: sourceName.optional(),
     source_scope: name.optional(),
   })
   .strict();
