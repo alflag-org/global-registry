@@ -1,3 +1,0 @@
-import forbiddenImportEquals = require('../../api/app');
-
-export { forbiddenImportEquals };

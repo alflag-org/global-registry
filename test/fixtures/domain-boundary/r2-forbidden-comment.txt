@@ -1,3 +1,0 @@
-import /* an intervening comment must not hide this dependency */ '../../api/app';
-
-export const forbiddenCommentFixture = true;

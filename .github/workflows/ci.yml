@@ -32,7 +32,7 @@ jobs:
 
       - name: Install locked dependencies
         run: |
-          mise install --locked
+          mise install --locked node npm:pnpm
           pnpm install --frozen-lockfile
           pnpm exec playwright install --with-deps chromium
 

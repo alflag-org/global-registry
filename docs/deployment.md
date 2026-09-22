@@ -1,105 +1,49 @@
-# Deployment contract
+# Deployment
 
-Global Registry is the Product Repository. It contains the Worker source, D1 migration
-chain, deployment manifest schemas, validator, Wrangler configuration generator, and
-deployment CLI. It does not contain an environment's account ID, resource IDs, Access
-audience, hostname, or credential values.
+Deploy one Worker, one D1 database, and a Cloudflare Access self-hosted application covering the entire Worker hostname. Keep real account IDs, database IDs, routes, and Access audience values in private environment configuration outside this repository.
 
-The private Instance Repository contains one `release.json` and one `deployment.json` for
-each environment. It selects an immutable Product commit and records the desired state for
-that environment. Its workflows call this repository's CLI; they do not reimplement
-deployment logic and do not copy Product source or schemas.
+## Database and Worker
 
-There is no `runtime.json`. Global Registry has no runtime configuration API, so the
-Instance Repository manages runtime desired state directly through the deployment manifest.
-
-## Manifest contract
-
-`release.json` is strict JSON with these fields:
-
-- `repository`: the Product repository in `owner/name` form;
-- `commit`: a full, lowercase, 40-character Git commit SHA.
-
-`deployment.json` is strict JSON with `schemaVersion: 1` and these groups:
-
-- `accountId` and `environment`;
-- `worker.name`, `worker.baseUrl`, and `worker.routes`;
-- D1, R2, primary Queue, and dead-letter Queue references;
-- Cloudflare Access `teamDomain` and `audience`;
-- `operations.backupActorId`;
-- optional observability overrides; and
-- one or more Cron expressions.
-
-The generated JSON Schemas are in [`deployment/schemas/`](../deployment/schemas/). The
-validated example is in [`deployment/example/`](../deployment/example/); it contains only
-sandbox values and is not a deployment target.
-
-## Product CLI
-
-Run the CLI from an immutable Product checkout. The Instance workflow supplies the manifest
-directory and, where appropriate, the expected Product repository and commit:
+Create a new D1 database for this schema. Export any older installation separately if needed; there is no in-place upgrade or importer.
 
 ```sh
-pnpm deployment validate \
-  --directory /path/to/environments/staging \
-  --expected-environment staging \
-  --source-repository owner/product \
-  --source-commit <full-product-sha>
-
-pnpm deployment generate \
-  --directory /path/to/environments/staging \
-  --output .work/wrangler.json
-
-pnpm deployment dry-run --directory /path/to/environments/staging
-pnpm deployment publish --directory /path/to/environments/staging
-pnpm deployment deploy --directory /path/to/environments/staging
+pnpm exec wrangler d1 create global-registry
 ```
 
-`generate` starts with the inert committed `wrangler.jsonc` and creates a temporary
-configuration. It fills the account, Worker, route, Access, storage, Queue, observability,
-Cron, and backup Actor values from the manifest. It always sets `workers_dev=false` and
-`preview_urls=false`, removes shared environment overrides, and invokes Wrangler with
-resource auto-creation disabled. The generated file is local execution state and must not
-be committed.
+Create a private Wrangler configuration based on `wrangler.jsonc`. Set an absolute `main` path to this checkout's `src/index.ts`, an absolute `migrations_dir` path, the Worker name/account/route, and the created `database_name` and `database_id` for binding `DB`. Keep `workers_dev` and `preview_urls` disabled. Do not copy the `development` environment into a production configuration.
 
-`validate` checks the two manifests and release pin. `dry-run` builds the generated Worker
-without uploading it. `publish` performs the dry run, checks the remote D1 migration ledger,
-and publishes the Worker. `deploy` performs the same steps and then applies the Product
-migrations to D1. Neither command creates or deletes Cloudflare resources, Access
-applications, DNS records, or GitHub environment protection.
+Set production variables:
 
-Before a remote publish or deploy, the CLI compares the remote D1 migration names with the
-Product migration chain. An unknown remote migration stops the command before the Worker is
-published. The CLI never performs an automatic rollback; restore the Instance release pin to
-a known-good Product commit only after confirming migration compatibility.
+- `ENVIRONMENT = "production"`
+- `ALLOW_LOCAL_AUTH = "false"`
+- `ACCESS_TEAM_DOMAIN = "<team>.cloudflareaccess.com"`
+- `ACCESS_AUD = "<Access application audience tag>"`
+- `LOCAL_AUTH_SECRET = "unset"`
+- `LOCAL_ACTOR_IDENTITY = "unset"`
 
-## Bootstrap and acceptance
-
-After the first migration of a fresh environment, bootstrap the first admin with the same
-fixed UUID recorded as `operations.backupActorId`:
+Apply the fresh migration, inspect the deployment bundle, then deploy using the private configuration:
 
 ```sh
-mise run bootstrap-admin -- \
-  --remote \
-  --database <manifest-database-name> \
-  --config <generated-wrangler-config> \
-  --actor-id <manifest-backup-actor-uuid> \
-  --identity access:<subject> \
-  --display-name "Registry Administrator"
+pnpm exec wrangler d1 migrations apply DB --remote --config /absolute/private/wrangler.jsonc
+pnpm exec wrangler deploy --dry-run --config /absolute/private/wrangler.jsonc
+pnpm exec wrangler deploy --config /absolute/private/wrangler.jsonc
 ```
 
-Use `service:<common_name>` for a service identity. The CLI refuses a second active admin
-bootstrap and verifies the admin row, audit event, and outbox row. The generated config and
-the manifest must come from the same Instance commit.
+Verify that unauthenticated access is blocked, then sign in and create a Location through the UI. Confirm the resulting audit entry. Check `/openapi.json` and `/docs` through Access. Inventory writes through direct D1 SQL bypass application audit and canonicalization and are not a supported operational workflow.
 
-Staging acceptance must cover composition, the fresh migration chain, Access protection,
-Queue and dead-letter handling, R2 writes, Cron execution, health and API routes, and the
-UI. Promote production through an Instance release-pin pull request only after those checks
-pass. Record the Product commit, Instance commit, environment, and Worker result in the
-deployment summary.
+## Human and machine access
 
-## Local development
+Configure an Access Allow policy for the intended people and a Service Auth policy for the intended Service Tokens. All admitted identities have the same application capabilities; there is no Registry account database or role mapping. Audit actors use signed JWT subjects (`access:<sub>`) or Service Token client IDs (`service:<common_name>`).
 
-The committed `wrangler.jsonc` remains an inert local-development configuration. Use the
-local migration and development commands from the README. `pnpm deploy:dry-run:local` only
-builds the local development configuration; it does not select or publish an environment.
+The Worker verifies the Access application JWT, including its RS256 signature, issuer, audience, expiration, and optional not-before time. Merely supplying identity headers or Service Token headers directly to the Worker does not authenticate a request.
+
+Machine clients send `CF-Access-Client-Id` and `CF-Access-Client-Secret` to the Access-protected hostname. Access validates those credentials and supplies `Cf-Access-Jwt-Assertion` to the Worker. Store Service Token secrets only in the external client's secret storage. No provider credentials or Service Token secrets belong in Registry data.
+
+```sh
+curl --fail-with-body \
+  -H "CF-Access-Client-Id: $ACCESS_CLIENT_ID" \
+  -H "CF-Access-Client-Secret: $ACCESS_CLIENT_SECRET" \
+  https://registry.example.com/api/v1/locations
+```
+
+Consult Cloudflare's [application token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/) and [Service Token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/) for Access policy setup and token handling.

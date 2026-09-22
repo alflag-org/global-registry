@@ -1,39 +1,19 @@
 # Security policy
 
-## Supported boundary
+Report suspected vulnerabilities privately through the repository's GitHub security reporting channel. Include the affected revision, reproduction steps, impact, and any relevant request/response evidence without secrets or real inventory data.
 
-Production is designed to run behind Cloudflare Access. The Product repository keeps its
-committed Wrangler configuration inert, with deployment values unset and workers.dev and
-preview exposure disabled. The private Instance repository supplies the Access team domain,
-audience, D1/R2/Queue references, scheduled maintenance, and active Actor mapping through the
-strict deployment manifest. Provider credential values are outside this registry; the
-application stores only uppercase credential references.
+## Trust boundaries
 
-Generated deployment configuration must keep `ENVIRONMENT` equal to the selected environment,
-`ALLOW_LOCAL_AUTH=false`, `workers_dev=false`, and `preview_urls=false`. Do not place
-credentials, private keys, Access assertions, raw production exports, or personal data in
-source, configuration, logs, fixtures, issues, or documentation.
+Production access is controlled by Cloudflare Access. The Worker independently validates Access JWT signatures, issuer, audience, and time claims. All identities admitted by Access can read and mutate inventory. Configure Access policies to match that authority; the application has no separate accounts or RBAC.
 
-## Authentication and authorization
+Audit identity comes only from verified claims. Service Token client credentials are consumed by Access, not stored or verified as local application credentials. Header spoofing must not bypass JWT verification.
 
-The Worker verifies the Cloudflare Access issuer, audience, RS256 signature, expiration, optional not-before claim, and canonical principal identity. A human principal is represented as `access:<sub>` and a service principal as `service:<common_name>`; email is not an identity fallback. The verified identity must map to an active Actor before using the registry API or main UI. Actor role checks authorize operations, and revision checks protect concurrent updates.
+Local authentication requires the development environment, explicit enablement, an unforwarded HTTP loopback request, and a private random 32-byte secret. The development UI shell contains no data and can be loaded before entering the secret; all inventory/API requests remain protected. Never expose this server using a proxy or tunnel. Production must keep local authentication disabled.
 
-Mutations require the JSON media type, a bounded streamed body, valid JSON limits, and same-origin or compatible Fetch Metadata conditions. Errors use structured codes and request IDs; logs redact unexpected error details. Writes use prepared statements. The D1 schema enforces foreign keys, revisions, append-only audit/history records, active-admin safeguards, and fencing for operation locks.
+## Integrity
 
-## Development-only local authentication
+D1 enforces foreign keys, unique identities, Interface ownership, VLAN location consistency, and IP membership through constraints and triggers. Application parsing canonicalizes network values. Database access is a privileged operational boundary; normal mutations use the API so validation and audit cannot be omitted.
 
-Local authentication is permitted only when `ENVIRONMENT=development` and `ALLOW_LOCAL_AUTH=true`. The supported `mise run dev` task runs Wrangler on `127.0.0.1`; never expose this mode through a public bind or tunnel.
+Data mutations and audit records commit together. The API offers no audit mutation endpoints, and database triggers reject audit edits. Audit logs are not a tamper-proof boundary against a D1 administrator who can alter the schema or restore the database.
 
-Local authentication is accepted only for an HTTP loopback URL with an exact `Host` match and no URL credentials. It also requires a valid `LOCAL_AUTH_SECRET` and a canonical local Actor identity. The secret must be a fresh 64-character lowercase hexadecimal value generated with `openssl rand -hex 32`; the checked-in example intentionally leaves it unset. The client supplies the secret through `x-global-registry-dev-secret` and may supply the identity through `x-global-registry-dev-identity`. The only trusted forwarding signal is one exact `cf-connecting-ip: 127.0.0.1` marker. Other forwarding context and duplicate or combined markers fail closed.
-
-## Security controls and operational boundary
-
-OpenAPI is served only after authentication. `/docs` uses repository-hosted assets and a self-only Content Security Policy without a CDN or `unsafe-inline`. JSON values, request bodies, export snapshots, and SQL recovery inputs are bounded and validated. Exports contain credential references, not credential values, and R2 completion is fenced by the D1 revision and claim token.
-
-These controls do not replace deployment acceptance. Operators must validate the target Access policy and cookie behavior and exercise D1 concurrency plus Queue/R2 partial-failure recovery in the deployed environment.
-
-The Security workflow runs on every `master` push, on manual dispatch, and each Monday at 03:23 UTC. It checks dependency advisories and package registry signatures, then uses Trivy to detect high- and critical-severity repository vulnerabilities, exposed secrets, and configuration problems. Action references are pinned to immutable commits.
-
-## Private reporting
-
-Report suspected vulnerabilities privately to the repository maintainers before public disclosure. Include a concise reproduction, the affected route or component, expected and observed behavior, and only the evidence needed to reproduce it. Do not include credential values, private keys, Access assertions, raw production exports, or personal data. Do not use a public issue for an undisclosed vulnerability.
+The browser UI uses same-origin requests, escapes data with DOM text APIs, and rejects cross-origin mutations. Scripts and styles are served locally under a restrictive content security policy. Do not introduce credential storage, provider integrations, or unaudited write paths into this application.
