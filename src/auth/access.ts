@@ -1,3 +1,4 @@
+import { createRemoteJWKSet, jwtVerify, errors } from 'jose';
 import { AuthorizationError, GlobalRegistryError } from '../api/errors';
 import {
   canonicalActorIdentitySchema,
@@ -19,31 +20,6 @@ export interface AccessEnvironment {
   LOCAL_ACTOR_IDENTITY: string;
 }
 
-interface AccessJwtHeader {
-  kid: string;
-}
-
-interface AccessJwtClaims {
-  aud: string[];
-  exp: number;
-  nbf?: number;
-  iss: string;
-  sub?: string;
-  common_name?: string;
-}
-
-interface AccessJwk {
-  kid: string;
-  kty: string;
-  n: string;
-  e: string;
-  alg?: string;
-  use?: string;
-}
-
-const JWKS_MEMO_TTL_MS = 5 * 60 * 1000;
-const JWKS_MEMO_MAX_ENTRIES = 8;
-const JWKS_RESPONSE_MAX_BYTES = 256 * 1024;
 const LOCAL_AUTH_SECRET_PATTERN = /^[a-f0-9]{64}$/;
 const LOCAL_AUTH_SECRET_MIN_UNIQUE_HEX_DIGITS = 8;
 const LOCAL_AUTH_SECRET_MAX_REPEAT_RUN = 8;
@@ -88,89 +64,7 @@ const PROXY_CONTEXT_FAMILY_PREFIXES = [
   'x-vercel',
   'x-appengine',
 ];
-const jwksMemo = new Map<string, { keys: AccessJwk[]; expiresAt: number }>();
-const jwksFetches = new Map<string, Promise<AccessJwk[]>>();
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function decodeBase64Url(segment: string): Uint8Array {
-  if (!/^[A-Za-z0-9_-]+$/.test(segment)) {
-    throw new AuthorizationError('access_required', 'Cloudflare Access token is malformed.');
-  }
-  const normalized = segment.replaceAll('-', '+').replaceAll('_', '/');
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-  try {
-    const binary = atob(padded);
-    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  } catch {
-    throw new AuthorizationError('access_required', 'Cloudflare Access token is malformed.');
-  }
-}
-
-function parseJsonSegment(segment: string, label: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(decodeBase64Url(segment)));
-    if (!isRecord(parsed)) throw new Error('not an object');
-    return parsed;
-  } catch {
-    throw new AuthorizationError('access_required', `Cloudflare Access ${label} is malformed.`);
-  }
-}
-
-function parseHeader(value: Record<string, unknown>): AccessJwtHeader {
-  if (value.alg !== 'RS256' || typeof value.kid !== 'string' || value.kid.length === 0) {
-    throw new AuthorizationError(
-      'access_required',
-      'Cloudflare Access token uses an unsupported signature.',
-    );
-  }
-  return { kid: value.kid };
-}
-
-function parseClaims(value: Record<string, unknown>): AccessJwtClaims {
-  const aud = value.aud;
-  if (
-    !Array.isArray(aud) ||
-    aud.length === 0 ||
-    !aud.every((item) => typeof item === 'string') ||
-    typeof value.exp !== 'number' ||
-    !Number.isFinite(value.exp) ||
-    typeof value.iss !== 'string'
-  ) {
-    throw new AuthorizationError('access_required', 'Cloudflare Access token claims are invalid.');
-  }
-  const optionalString = (name: string): string | undefined =>
-    typeof value[name] === 'string' ? value[name] : undefined;
-  const optionalNumber = (name: string): number | undefined => {
-    if (value[name] === undefined) return undefined;
-    if (typeof value[name] !== 'number' || !Number.isFinite(value[name])) {
-      throw new AuthorizationError(
-        'access_required',
-        'Cloudflare Access token claims are invalid.',
-      );
-    }
-    return value[name];
-  };
-  const nbf = optionalNumber('nbf');
-  const sub = optionalString('sub');
-  const commonName = optionalString('common_name');
-  return {
-    aud,
-    exp: value.exp,
-    iss: value.iss,
-    ...(nbf === undefined ? {} : { nbf }),
-    ...(sub === undefined ? {} : { sub }),
-    ...(commonName === undefined ? {} : { common_name: commonName }),
-  };
-}
-
-function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy.buffer;
-}
+let signingKeys: { domain: string; resolve: ReturnType<typeof createRemoteJWKSet> } | undefined;
 
 function normalizeTeamDomain(value: string): string {
   try {
@@ -188,210 +82,47 @@ function normalizeTeamDomain(value: string): string {
   }
 }
 
-function parseJwks(value: unknown): AccessJwk[] {
-  if (!isRecord(value) || !Array.isArray(value.keys)) {
-    throw new GlobalRegistryError(
-      503,
-      'access_keys_invalid',
-      'Cloudflare Access signing keys are invalid.',
-    );
+async function verifyAccessJwt(
+  token: string,
+  teamDomain: string,
+  audience: string,
+): Promise<AccessPrincipal> {
+  if (signingKeys?.domain !== teamDomain) {
+    signingKeys = {
+      domain: teamDomain,
+      resolve: createRemoteJWKSet(new URL(`https://${teamDomain}/cdn-cgi/access/certs`)),
+    };
   }
-  return value.keys.flatMap((key) => {
-    if (
-      !isRecord(key) ||
-      typeof key.kid !== 'string' ||
-      typeof key.kty !== 'string' ||
-      typeof key.n !== 'string' ||
-      typeof key.e !== 'string'
-    ) {
-      return [];
-    }
-    return [
-      {
-        kid: key.kid,
-        kty: key.kty,
-        n: key.n,
-        e: key.e,
-        ...(typeof key.alg === 'string' ? { alg: key.alg } : {}),
-        ...(typeof key.use === 'string' ? { use: key.use } : {}),
-      },
-    ];
-  });
-}
-
-function invalidJwksResponseError(): GlobalRegistryError {
-  return new GlobalRegistryError(
-    503,
-    'access_keys_invalid',
-    'Cloudflare Access signing keys are invalid.',
-  );
-}
-
-function unavailableJwksResponseError(): GlobalRegistryError {
-  return new GlobalRegistryError(
-    503,
-    'access_keys_unavailable',
-    'Cloudflare Access signing keys are unavailable.',
-  );
-}
-
-function declaredResponseLength(headers: Headers): number | 'invalid' | 'missing' {
-  const value = headers.get('content-length');
-  if (value === null) return 'missing';
-  const entries = value.split(',').map((entry) => entry.trim());
-  if (entries.length !== 1 || entries[0] === undefined || !/^\d+$/.test(entries[0])) {
-    return 'invalid';
-  }
-  const length = Number(entries[0]);
-  return Number.isSafeInteger(length) && length >= 0 ? length : 'invalid';
-}
-
-async function readBoundedJwksBody(response: Response): Promise<Uint8Array> {
-  if (response.body === null) throw unavailableJwksResponseError();
-  const reader = response.body.getReader();
-  const body = new Uint8Array(JWKS_RESPONSE_MAX_BYTES);
-  let bytes = 0;
+  let claims;
   try {
-    while (true) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      if (chunk.value.byteLength > JWKS_RESPONSE_MAX_BYTES - bytes) {
-        await reader.cancel().catch(() => undefined);
-        throw invalidJwksResponseError();
-      }
-      body.set(chunk.value, bytes);
-      bytes += chunk.value.byteLength;
-    }
-    return body.subarray(0, bytes);
+    ({ payload: claims } = await jwtVerify(token, signingKeys.resolve, {
+      algorithms: ['RS256'],
+      issuer: `https://${teamDomain}`,
+      audience,
+      requiredClaims: ['exp'],
+    }));
   } catch (error) {
-    if (error instanceof GlobalRegistryError) throw error;
-    throw unavailableJwksResponseError();
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-async function fetchSigningKeys(teamDomain: string): Promise<AccessJwk[]> {
-  const certificateUrl = `https://${teamDomain}/cdn-cgi/access/certs`;
-  try {
-    const response = await fetch(certificateUrl, {
-      headers: { Accept: 'application/json' },
-      redirect: 'error',
-    });
-    if (!response.ok) {
+    if (
+      error instanceof errors.JWKSTimeout ||
+      error instanceof errors.JWKSInvalid ||
+      (error instanceof errors.JOSEError && error.code === 'ERR_JOSE_GENERIC') ||
+      !(error instanceof errors.JOSEError)
+    ) {
       throw new GlobalRegistryError(
         503,
         'access_keys_unavailable',
         'Cloudflare Access signing keys are unavailable.',
       );
     }
-    const contentLength = declaredResponseLength(response.headers);
-    if (
-      contentLength === 'invalid' ||
-      (typeof contentLength === 'number' && contentLength > JWKS_RESPONSE_MAX_BYTES)
-    ) {
-      throw invalidJwksResponseError();
-    }
-    const body = await readBoundedJwksBody(response);
-    return parseJwks(JSON.parse(new TextDecoder().decode(body)) as unknown);
-  } catch (error) {
-    if (error instanceof GlobalRegistryError) throw error;
-    throw unavailableJwksResponseError();
-  }
-}
-
-function memoizeSigningKeys(teamDomain: string, keys: AccessJwk[]): AccessJwk[] {
-  if (jwksMemo.size >= JWKS_MEMO_MAX_ENTRIES && !jwksMemo.has(teamDomain)) {
-    const oldest = jwksMemo.keys().next().value;
-    if (oldest !== undefined) jwksMemo.delete(oldest);
-  }
-  jwksMemo.set(teamDomain, { keys, expiresAt: Date.now() + JWKS_MEMO_TTL_MS });
-  return keys;
-}
-
-async function getSigningKey(teamDomain: string, kid: string): Promise<AccessJwk | undefined> {
-  const cached = jwksMemo.get(teamDomain);
-  if (cached !== undefined && cached.expiresAt > Date.now()) {
-    const key = cached.keys.find((candidate) => candidate.kid === kid);
-    if (key !== undefined) return key;
-  }
-
-  let fetchPromise = jwksFetches.get(teamDomain);
-  if (fetchPromise === undefined) {
-    fetchPromise = fetchSigningKeys(teamDomain);
-    jwksFetches.set(teamDomain, fetchPromise);
-  }
-  try {
-    const refreshed = memoizeSigningKeys(teamDomain, await fetchPromise);
-    return refreshed.find((candidate) => candidate.kid === kid);
-  } finally {
-    if (jwksFetches.get(teamDomain) === fetchPromise) jwksFetches.delete(teamDomain);
-  }
-}
-
-async function verifyAccessJwt(
-  token: string,
-  teamDomain: string,
-  audience: string,
-): Promise<AccessPrincipal> {
-  const parts = token.split('.');
-  if (parts.length !== 3) {
-    throw new AuthorizationError('access_required', 'Cloudflare Access token is malformed.');
-  }
-  const [headerSegment, payloadSegment, signatureSegment] = parts;
-  if (
-    headerSegment === undefined ||
-    payloadSegment === undefined ||
-    signatureSegment === undefined
-  ) {
-    throw new AuthorizationError('access_required', 'Cloudflare Access token is malformed.');
-  }
-  const header = parseHeader(parseJsonSegment(headerSegment, 'header'));
-  const claims = parseClaims(parseJsonSegment(payloadSegment, 'payload'));
-  const currentSeconds = Math.floor(Date.now() / 1000);
-  if (
-    claims.exp <= currentSeconds ||
-    (claims.nbf !== undefined && claims.nbf > currentSeconds) ||
-    claims.iss !== `https://${teamDomain}` ||
-    !claims.aud.includes(audience)
-  ) {
     throw new AuthorizationError(
       'access_required',
-      'Cloudflare Access token is not valid for this application.',
+      'Cloudflare Access token signature or claims are invalid.',
     );
   }
-  const jwk = await getSigningKey(teamDomain, header.kid);
-  if (
-    jwk === undefined ||
-    jwk.kty !== 'RSA' ||
-    (jwk.alg !== undefined && jwk.alg !== 'RS256') ||
-    (jwk.use !== undefined && jwk.use !== 'sig')
-  ) {
-    throw new AuthorizationError('access_required', 'Cloudflare Access signing key was not found.');
-  }
-  const key = await crypto.subtle.importKey(
-    'jwk',
-    { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: 'RS256', ext: true },
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  );
-  const valid = await crypto.subtle.verify(
-    { name: 'RSASSA-PKCS1-v1_5' },
-    key,
-    asArrayBuffer(decodeBase64Url(signatureSegment)),
-    asArrayBuffer(new TextEncoder().encode(`${headerSegment}.${payloadSegment}`)),
-  );
-  if (!valid) {
-    throw new AuthorizationError(
-      'access_required',
-      'Cloudflare Access token signature is invalid.',
-    );
-  }
-  if (claims.common_name !== undefined && claims.common_name.length > 0) {
+  if (typeof claims.common_name === 'string' && claims.common_name.length > 0) {
     return canonicalPrincipal(`service:${claims.common_name}`);
   }
-  if (claims.sub !== undefined && claims.sub.length > 0) {
+  if (typeof claims.sub === 'string' && claims.sub.length > 0) {
     return canonicalPrincipal(`access:${claims.sub}`);
   }
   throw new AuthorizationError(
