@@ -14,7 +14,7 @@ importers:
     dependencies:
       '@hono/zod-openapi':
         specifier: ^1.4.0
-        version: 1.4.0(hono@4.13.8)(zod@4.4.3)
+        version: 1.4.0(hono@4.13.8)(zod@4.6.5)
       hono:
         specifier: ^4.13.8
         version: 4.13.8
@@ -28,8 +28,8 @@ importers:
         specifier: 5.32.15
         version: 5.32.15
       zod:
-        specifier: ^4.4.3
-        version: 4.4.3
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.20.1
@@ -1393,12 +1393,15 @@ packages:
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
+  zod@4.6.5:
+    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
+
 snapshots:
 
-  '@asteasolutions/zod-to-openapi@8.5.0(zod@4.4.3)':
+  '@asteasolutions/zod-to-openapi@8.5.0(zod@4.6.5)':
     dependencies:
       openapi3-ts: 4.6.0
-      zod: 4.4.3
+      zod: 4.6.5
 
   '@cloudflare/kv-asset-handler@0.5.0': {}
 
@@ -1560,18 +1563,18 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@hono/zod-openapi@1.4.0(hono@4.13.8)(zod@4.4.3)':
+  '@hono/zod-openapi@1.4.0(hono@4.13.8)(zod@4.6.5)':
     dependencies:
-      '@asteasolutions/zod-to-openapi': 8.5.0(zod@4.4.3)
-      '@hono/zod-validator': 0.8.0(hono@4.13.8)(zod@4.4.3)
+      '@asteasolutions/zod-to-openapi': 8.5.0(zod@4.6.5)
+      '@hono/zod-validator': 0.8.0(hono@4.13.8)(zod@4.6.5)
       hono: 4.13.8
       openapi3-ts: 4.6.0
-      zod: 4.4.3
+      zod: 4.6.5
 
-  '@hono/zod-validator@0.8.0(hono@4.13.8)(zod@4.4.3)':
+  '@hono/zod-validator@0.8.0(hono@4.13.8)(zod@4.6.5)':
     dependencies:
       hono: 4.13.8
-      zod: 4.4.3
+      zod: 4.6.5
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -2497,3 +2500,5 @@ snapshots:
       youch-core: 0.3.3
 
   zod@4.4.3: {}
+
+  zod@4.6.5: {}

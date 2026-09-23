@@ -31,7 +31,7 @@
     "ipaddr.js": "2.5.0",
     "jose": "^6.2.12",
     "swagger-ui-dist": "5.32.15",
-    "zod": "^4.4.3"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.20.1",
