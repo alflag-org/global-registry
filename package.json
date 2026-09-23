@@ -30,6 +30,7 @@
     "hono": "^4.13.8",
     "ipaddr.js": "2.5.0",
     "jose": "^6.2.12",
+    "swagger-ui-dist": "5.32.15",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -2,6 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "global-registry",
   "main": "src/index.ts",
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["swagger-ui-dist/swagger-ui*", "**/swagger-ui-dist/swagger-ui*"],
+      "fallthrough": true,
+    },
+  ],
   "compatibility_date": "2026-07-08",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
