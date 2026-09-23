@@ -6,7 +6,7 @@ Global Registry is a source of truth for infrastructure inventory and IPAM. The 
 
 - `src/api`: runtime Zod validation, OpenAPI route declarations, HTTP errors, and browser request protections.
 - `src/auth`: Access JWT signature/issuer/audience/time validation and the separate local authentication boundary.
-- `src/db`: explicit entity SQL, related detail queries, and atomic audit/mutation batches.
+- `src/db`: per-entity definitions with generated CRUD SQL, related detail queries, and atomic audit/mutation batches.
 - `src/ipam`: IP parsing, canonicalization, range arithmetic, and allocation.
 - `src/ui`: a same-origin browser client; forms consume the generated OpenAPI input schemas.
 
