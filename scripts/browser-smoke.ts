@@ -165,8 +165,8 @@ try {
     await page.getByRole('button', { name: 'Search', exact: true }).click();
     await page.getByRole('link', { name: 'Browser server', exact: true }).waitFor();
     await page.goto(base + '/docs');
-    await page.getByRole('heading', { name: 'REST API', exact: true }).waitFor();
-    assert((await page.locator('details').count()) > 30);
+    await page.locator('#swagger-ui .opblock').first().waitFor();
+    assert((await page.locator('#swagger-ui .opblock').count()) > 30);
     await page.goto(base + '/prefixes/' + prefix);
     await page.getByRole('heading', { name: '10.42.0.0/24', exact: true }).waitFor();
     await page.getByRole('link', { name: '10.42.0.1', exact: true }).waitFor();

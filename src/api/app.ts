@@ -7,7 +7,7 @@ import { authenticateAccessPrincipal } from '../auth/access';
 import { AuthorizationError, GlobalRegistryError } from './errors';
 import type { ApiEnvironment } from '../db/types';
 import { registerRoutes } from './routes';
-import { shell, client, styles } from '../ui/app';
+import { shell, client, styles, docsPage, swaggerCss, swaggerInit, swaggerJs } from '../ui/app';
 export const app = new OpenAPIHono<ApiEnvironment>({
   defaultHook: (result, c) => {
     if (!result.success)
@@ -20,21 +20,28 @@ export const app = new OpenAPIHono<ApiEnvironment>({
       );
   },
 });
-app.use(
-  '*',
+const baseCsp = {
+  defaultSrc: ["'none'"],
+  scriptSrc: ["'self'"],
+  styleSrc: ["'self'"],
+  connectSrc: ["'self'"],
+  imgSrc: ["'self'"],
+  baseUri: ["'none'"],
+  frameAncestors: ["'none'"],
+  formAction: ["'self'"],
+};
+// Swagger UI injects styles and data: images at runtime; /docs relaxes only those directives.
+const docsCsp = {
+  ...baseCsp,
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  imgSrc: ["'self'", 'data:'],
+  fontSrc: ["'self'", 'data:'],
+};
+app.use('*', async (c, next) =>
   secureHeaders({
-    contentSecurityPolicy: {
-      defaultSrc: ["'none'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'"],
-      connectSrc: ["'self'"],
-      imgSrc: ["'self'"],
-      baseUri: ["'none'"],
-      frameAncestors: ["'none'"],
-      formAction: ["'self'"],
-    },
+    contentSecurityPolicy: c.req.path === '/docs' ? docsCsp : baseCsp,
     referrerPolicy: 'no-referrer',
-  }),
+  })(c, next),
 );
 app.use('*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
@@ -114,8 +121,17 @@ app.get('/assets/app.js', (c) =>
 app.get('/assets/app.css', (c) =>
   c.body(styles, 200, { 'Content-Type': 'text/css; charset=utf-8' }),
 );
+app.get('/assets/swagger-ui.js', (c) =>
+  c.body(swaggerJs, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }),
+);
+app.get('/assets/swagger-ui.css', (c) =>
+  c.body(swaggerCss, 200, { 'Content-Type': 'text/css; charset=utf-8' }),
+);
+app.get('/assets/swagger-init.js', (c) =>
+  c.body(swaggerInit, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }),
+);
 app.get('/', (c) => c.html(shell));
-app.get('/docs', (c) => c.html(shell));
+app.get('/docs', (c) => c.html(docsPage));
 for (const path of [
   'locations',
   'devices',
