@@ -12,6 +12,8 @@ pnpm exec wrangler d1 create global-registry
 
 Create a private Wrangler configuration based on `wrangler.jsonc`. Set an absolute `main` path to this checkout's `src/index.ts`, an absolute `migrations_dir` path, the Worker name/account/route, and the created `database_name` and `database_id` for binding `DB`. Keep `workers_dev` and `preview_urls` disabled. Do not copy the `development` environment into a production configuration.
 
+Automated deploys run from the private `alflag-org/global-registry-deploy` repository, which owns the production Wrangler configuration and a manual dispatch workflow for this Worker. This repository intentionally carries placeholders only.
+
 Set production variables:
 
 - `ENVIRONMENT = "production"`
