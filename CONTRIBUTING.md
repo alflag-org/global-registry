@@ -4,7 +4,7 @@ Global Registry manages infrastructure inventory and IPAM on Workers, D1, and Ac
 
 ## Development
 
-Use the Node.js and pnpm versions pinned in `mise.toml`:
+Use the Node.js and pnpm versions pinned in `mise.toml`. Keep `.node-version` aligned with the Node.js pin so Workers Builds selects the same runtime:
 
 ```sh
 mise install --locked node npm:pnpm
@@ -14,7 +14,7 @@ pnpm db:migrate:local
 pnpm dev
 ```
 
-Configure the development secret as described in [README](README.md). Never commit local secrets, Worker binding declarations, local database state, exports, or environment identifiers.
+Wrangler's `access.dev` provides the local identity using the production authentication middleware. Never commit secrets, generated Worker binding declarations, local database state, exports, or production resource identifiers.
 
 Keep API schemas and validation together. Use explicit entity queries and prepared bindings. Every API mutation, including dependent changes caused by deletion, must include audit records in its atomic D1 batch. Test behavior at the D1 and HTTP boundaries. No production write should be added without a validation path.
 

@@ -4,11 +4,13 @@ Report suspected vulnerabilities privately through the repository's GitHub secur
 
 ## Trust boundaries
 
-Production access is controlled by Cloudflare Access. The Worker independently validates Access JWT signatures, issuer, audience, and time claims. All identities admitted by Access can read and mutate inventory. Configure Access policies to match that authority; the application has no separate accounts or RBAC.
+Cloudflare Access authenticates requests before Worker invocation. Global Registry trusts only the runtime-provided `ctx.access` and obtains identity through `ctx.access.getIdentity()`. All routes, including the UI, API, documentation, and assets, reject missing Access context with HTTP 403. HTTP headers alone never authenticate a request.
 
-Audit identity comes only from verified claims. Service Token client credentials are consumed by Access, not stored or verified as local application credentials. Header spoofing must not bypass JWT verification.
+All identities admitted by Access can read and mutate inventory. Configure Access policies to match that authority; the application has no separate accounts or RBAC. Worker-level Access should protect all traffic.
 
-Local authentication requires the development environment, explicit enablement, an unforwarded HTTP loopback request, and a private random 32-byte secret. The development UI shell contains no data and can be loaded before entering the secret; all inventory/API requests remain protected. Never expose this server using a proxy or tunnel. Production must keep local authentication disabled.
+Audit identity uses `access:<user_uuid>` for people and `service:<service_token_id>` when Access identifies service authentication. Missing or malformed identity fields are rejected. Service Token credentials are consumed by Access and must never be stored in Registry data.
+
+Local development uses Wrangler's `access.dev` simulation and the same authentication code path as production. There is no application-managed local authentication or secret. Keep the simulated development server on loopback and do not expose it through a tunnel or proxy. Wrangler's development identity does not configure production Access.
 
 ## Integrity
 

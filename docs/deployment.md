@@ -1,51 +1,57 @@
 # Deployment
 
-Deploy one Worker, one D1 database, and a Cloudflare Access self-hosted application covering the entire Worker hostname. Keep real account IDs, database IDs, routes, and Access audience values in private environment configuration outside this repository.
+Install Global Registry with [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/alflag-org/global-registry). This is the supported production installation path for a fresh installation.
 
-## Database and Worker
+## Deploy the application
 
-Create a new D1 database for this schema. Export any older installation separately if needed; there is no in-place upgrade or importer.
+1. Open the Deploy button and connect your GitHub and Cloudflare accounts as prompted.
+2. Choose the repository and Worker names. Cloudflare creates a repository in your account from the public Global Registry source.
+3. Accept the detected build (`pnpm build`) and deploy (`pnpm deploy`) commands and start deployment.
 
-```sh
-pnpm exec wrangler d1 create global-registry
-```
+Cloudflare provisions a new D1 database and the Worker, binds the database as `DB`, and writes the actual database name and ID into your repository's Wrangler configuration. The upstream UUID is a template-only resource identifier, not a production database or credential.
 
-Create a private Wrangler configuration based on `wrangler.jsonc`. Set an absolute `main` path to this checkout's `src/index.ts`, an absolute `migrations_dir` path, the Worker name/account/route, and the created `database_name` and `database_id` for binding `DB`. Keep `workers_dev` and `preview_urls` disabled. Do not copy the `development` environment into a production configuration.
+Workers Builds generates bindings and typechecks using the repository-pinned tools, then the deploy command applies pending D1 migrations through binding `DB` before publishing the Worker. A migration failure stops deployment. Database renaming during setup does not change this path. No application configuration values or secrets are required.
 
-Set production variables:
+The default address is `https://<worker>.<account>.workers.dev`; a custom domain is optional. Before enabling Access, visiting the application must return **HTTP 403**. This is the expected fail-closed state. The UI, inventory, API documentation, and assets must not be accessible.
 
-- `ENVIRONMENT = "production"`
-- `ALLOW_LOCAL_AUTH = "false"`
-- `ACCESS_TEAM_DOMAIN = "<team>.cloudflareaccess.com"`
-- `ACCESS_AUD = "<Access application audience tag>"`
-- `LOCAL_AUTH_SECRET = "unset"`
-- `LOCAL_ACTOR_IDENTITY = "unset"`
+## Enable Worker-level Access
 
-Apply all pending migrations, inspect the deployment bundle, then deploy using the private configuration:
+This is the only required manual step after deployment:
 
-```sh
-pnpm exec wrangler d1 migrations apply DB --remote --config /absolute/private/wrangler.jsonc
-pnpm exec wrangler deploy --dry-run --config /absolute/private/wrangler.jsonc
-pnpm exec wrangler deploy --config /absolute/private/wrangler.jsonc
-```
+1. Open **Cloudflare Dashboard → Workers & Pages → your Global Registry Worker → Access**.
+2. Choose **Protect this Worker behind Access**.
+3. Select **All traffic** to protect production as well as previews.
+4. Select the authentication policy for the people who should use the Registry.
+5. Choose **Apply Access**.
 
-Verify that unauthenticated access is blocked, then sign in and create a Location through the UI. Confirm the resulting audit entry. Check `/openapi.json` and `/docs` through Access. Inventory writes through direct D1 SQL bypass application audit and canonicalization and are not a supported operational workflow.
+If the account has not used Zero Trust, complete the prompted Zero Trust initialization first. Advanced policies can be edited in Zero Trust.
 
-## Human and machine access
+Worker-level Access covers the Worker's `workers.dev` address, custom domains, routes, and preview URLs if enabled. There is no need to configure a separate hostname-based application for installation. All identities allowed by Access can read and mutate Registry data; there is no first-admin setup or application account database.
 
-Configure an Access Allow policy for the intended people and a Service Auth policy for the intended Service Tokens. All admitted identities have the same application capabilities; there is no Registry account database or role mapping. Audit actors use signed JWT subjects (`access:<sub>`) or Service Token client IDs (`service:<common_name>`).
+## Verify installation
 
-The Worker verifies the Access application JWT, including its RS256 signature, issuer, audience, expiration, and optional not-before time. Merely supplying identity headers or Service Token headers directly to the Worker does not authenticate a request.
+1. Before Access setup, confirm HTTP 403 at `/`, `/api/v1/locations`, `/docs`, `/openapi.json`, and `/assets/app.js`. Application content appearing without Access is a security defect; do not add inventory until corrected.
+2. After applying Access, visit the Worker address and sign in through Access.
+3. Confirm the UI displays, create a Location, and open **Audit Log**. Its actor must be `access:<user_uuid>`.
+4. Open `/docs` and `/openapi.json` in the authenticated session.
+5. Verify a signed-out browser is challenged or denied by Access and cannot read inventory.
 
-Machine clients send `CF-Access-Client-Id` and `CF-Access-Client-Secret` to the Access-protected hostname. Access validates those credentials and supplies `Cf-Access-Jwt-Assertion` to the Worker. Store Service Token secrets only in the external client's secret storage. No provider credentials or Service Token secrets belong in Registry data.
+## Machine access
+
+For API automation, create a Cloudflare Access Service Token and permit it with a **Service Auth** policy on the Worker's Access application. Store its credentials only in the external client's secret storage.
 
 ```sh
 curl --fail-with-body \
   -H "CF-Access-Client-Id: $ACCESS_CLIENT_ID" \
   -H "CF-Access-Client-Secret: $ACCESS_CLIENT_SECRET" \
-  https://registry.example.com/api/v1/locations
+  "https://<worker>.<account>.workers.dev/api/v1/locations"
 ```
 
-Consult Cloudflare's [application token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/) and [Service Token documentation](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/) for Access policy setup and token handling.
+The flow is client → Cloudflare Access → authenticated Worker invocation → `ctx.access`. The Worker does not validate these headers directly. Service mutations are audited as `service:<service_token_id>`. Missing runtime Access context or required identity fields always cause rejection.
 
-When upgrading an inventory database, apply all pending migrations before serving the updated Worker. Migration `0002_source_identifiers.sql` rejects existing noncanonical source values instead of silently rewriting identities. Correct them through the authenticated API first, resolving any duplicate triples, so changes remain audited.
+## Platform references
+
+- [Deploy to Cloudflare documentation](https://developers.cloudflare.com/workers/platform/deploy-buttons/) describes resource provisioning, repository configuration, and detected scripts.
+- [Official D1 template](https://github.com/cloudflare/templates/tree/main/d1-template) uses a UUID template identifier and a `predeploy` migration lifecycle. Global Registry instead places the migration directly in `deploy` so it always precedes publishing without relying on lifecycle configuration.
+- [Access on Workers](https://developers.cloudflare.com/workers/configuration/cloudflare-access/) describes Worker-level protection and local identity simulation.
+- [Service Tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/) describes machine credentials and policies.

@@ -12,11 +12,9 @@ const json = <T extends z.ZodType>(schema: T) => ({
 });
 const errors = {
   400: { ...json(s.errorSchema), description: 'Validation error' },
-  401: { ...json(s.errorSchema), description: 'Authentication required' },
   403: { ...json(s.errorSchema), description: 'Forbidden' },
   404: { ...json(s.errorSchema), description: 'Not found' },
   409: { ...json(s.errorSchema), description: 'Uniqueness, relationship or concurrency conflict' },
-  503: { ...json(s.errorSchema), description: 'Authentication configuration or keys unavailable' },
 };
 export function registerRoutes(app: OpenAPIHono<ApiEnvironment>) {
   app.openapi(

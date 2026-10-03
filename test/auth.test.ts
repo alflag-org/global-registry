@@ -1,194 +1,135 @@
+import { createExecutionContext } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { it, expect, vi, afterEach } from 'vitest';
-import { authenticateAccessPrincipal, type AccessEnvironment } from '../src/auth/access';
+import { it, expect } from 'vitest';
+import { authenticateAccessPrincipal } from '../src/auth/access';
 import { app } from '../src/api/app';
-const local: AccessEnvironment = { ...env };
-function req(headers: Record<string, string> = {}, url = 'http://localhost/api/v1/locations') {
-  return new Request(url, {
-    headers: {
-      host: new URL(url).host,
-      'x-global-registry-dev-secret': local.LOCAL_AUTH_SECRET,
-      ...headers,
-    },
-  });
-}
-afterEach(() => vi.restoreAllMocks());
-it('permits only authenticated, unforwarded loopback development', async () => {
-  expect((await authenticateAccessPrincipal(req(), local)).identity).toBe('access:local-developer');
-  for (const request of [
-    req({ 'x-global-registry-dev-secret': 'wrong' }),
-    req({ forwarded: 'host=localhost' }),
-    req({ 'cf-connecting-ip': '192.0.2.1' }),
-    req({}, 'https://localhost/api/v1/locations'),
-    req({}, 'http://example.com/api/v1/locations'),
-  ])
-    await expect(authenticateAccessPrincipal(request, local)).rejects.toThrow();
-  await expect(
-    authenticateAccessPrincipal(req(), { ...local, ENVIRONMENT: 'production' }),
-  ).rejects.toThrow(/development/);
-  await expect(
-    authenticateAccessPrincipal(req(), { ...local, LOCAL_AUTH_SECRET: 'unset' }),
-  ).rejects.toThrow();
-});
-const b64 = (data: string | Uint8Array) =>
-  btoa(typeof data === 'string' ? data : String.fromCharCode(...data))
-    .replace(/=/g, '')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_');
-async function signer() {
-  const pair = await crypto.subtle.generateKey(
-    {
-      name: 'RSASSA-PKCS1-v1_5',
-      modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]),
-      hash: 'SHA-256',
-    },
-    true,
-    ['sign', 'verify'],
-  );
-  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey);
-  const kid = crypto.randomUUID();
-  const domain = crypto.randomUUID() + '.cloudflareaccess.com';
-  const settings = {
-    ...local,
-    ENVIRONMENT: 'production',
-    ALLOW_LOCAL_AUTH: 'false',
-    ACCESS_TEAM_DOMAIN: domain,
-    ACCESS_AUD: 'registry-audience',
-  };
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    Response.json({ keys: [{ ...jwk, kid, alg: 'RS256' }] }),
-  );
-  return {
-    settings,
-    jwk: { ...jwk, kid, alg: 'RS256' },
-    async token(claims: Record<string, unknown> = {}, header: Record<string, unknown> = {}) {
-      const head = b64(JSON.stringify({ alg: 'RS256', kid, ...header }));
-      const body = b64(
-        JSON.stringify({
-          aud: ['registry-audience'],
-          exp: Math.floor(Date.now() / 1000) + 300,
-          iss: 'https://' + domain,
-          sub: 'human-subject',
-          ...claims,
-        }),
+import { fakeAccessContext, humanIdentity } from './access-context';
+
+it('rejects missing runtime Access even when authentication headers are supplied', async () => {
+  await expect(authenticateAccessPrincipal(undefined)).rejects.toMatchObject({ status: 403 });
+  for (const path of [
+    '/',
+    '/locations',
+    '/api/v1/locations',
+    '/docs',
+    '/openapi.json',
+    '/assets/app.js',
+    '/assets/app.css',
+    '/missing',
+  ]) {
+    for (const headers of [
+      {},
+      {
+        'Cf-Access-Jwt-Assertion': 'forged',
+        'CF-Access-Client-Id': 'forged',
+        'CF-Access-Client-Secret': 'forged',
+      },
+    ]) {
+      const response = await app.fetch(
+        new Request('https://registry.example' + path, { headers }),
+        env,
+        createExecutionContext(),
       );
-      const signature = await crypto.subtle.sign(
-        'RSASSA-PKCS1-v1_5',
-        pair.privateKey,
-        new TextEncoder().encode(head + '.' + body),
-      );
-      return head + '.' + body + '.' + b64(new Uint8Array(signature));
-    },
-  };
-}
-it('validates production signatures and derives human and machine identities from signed claims', async () => {
-  const { settings, token } = await signer();
-  expect(
-    (await authenticateAccessPrincipal(req({ 'Cf-Access-Jwt-Assertion': await token() }), settings))
-      .identity,
-  ).toBe('access:human-subject');
-  expect(
-    (
-      await authenticateAccessPrincipal(
-        req({ 'Cf-Access-Jwt-Assertion': await token({ sub: '', common_name: 'client.access' }) }),
-        settings,
-      )
-    ).identity,
-  ).toBe('service:client.access');
+      expect(response.status, path).toBe(403);
+      expect(await response.json()).toMatchObject({ code: 'access_required' });
+    }
+  }
   const response = await app.fetch(
-    req({ 'Cf-Access-Jwt-Assertion': await token({ common_name: 'client.access' }) }),
-    { ...env, ...settings },
+    new Request('https://registry.example/api/v1/locations', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Denied', slug: 'denied' }),
+    }),
+    env,
+    createExecutionContext(),
   );
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(403);
+  expect(await env.DB.prepare("SELECT id FROM locations WHERE slug = 'denied'").first()).toBeNull();
 });
-it('rejects expired, premature, wrong-audience, wrong-issuer, identity-less and forged JWTs', async () => {
-  const { settings, token } = await signer();
-  for (const claims of [
-    { exp: 0 },
-    { exp: undefined },
-    { nbf: 'invalid' },
-    { nbf: Math.floor(Date.now() / 1000) + 1000 },
-    { aud: ['other'] },
-    { iss: 'https://evil.example' },
-    { sub: '', common_name: '' },
-  ])
+
+it('uses stable human UUIDs regardless of email and service IDs with service precedence', async () => {
+  for (const email of ['before@example.invalid', 'after@example.invalid']) {
+    expect(
+      await authenticateAccessPrincipal(fakeAccessContext({ ...humanIdentity, email }).access),
+    ).toEqual({
+      identity: 'access:' + humanIdentity.user_uuid,
+      type: 'human',
+    });
+  }
+  expect(
+    await authenticateAccessPrincipal(
+      fakeAccessContext({
+        ...humanIdentity,
+        service_token_status: true,
+        service_token_id: 'machine-id',
+      }).access,
+    ),
+  ).toEqual({ identity: 'service:machine-id', type: 'service' });
+});
+
+it('rejects missing or malformed identities and identity lookup failures', async () => {
+  for (const identity of [
+    null,
+    {},
+    { email: 'only@example.invalid' },
+    { user_uuid: '' },
+    { user_uuid: ' padded ' },
+    { user_uuid: 'bad\nvalue' },
+    { user_uuid: 42 },
+    { user_uuid: 'x'.repeat(256) },
+    { ...humanIdentity, service_token_status: 'true' },
+    { ...humanIdentity, service_token_status: true },
+    { service_token_status: true, service_token_id: '' },
+    { service_token_status: true, service_token_id: 42 },
+  ]) {
     await expect(
       authenticateAccessPrincipal(
-        req({ 'Cf-Access-Jwt-Assertion': await token(claims) }),
-        settings,
+        fakeAccessContext(identity as CloudflareAccessIdentity | null).access,
       ),
-    ).rejects.toThrow();
-  const good = await token();
-  const pieces = good.split('.');
-  pieces[1] = b64(
-    JSON.stringify({
-      aud: ['registry-audience'],
-      exp: Math.floor(Date.now() / 1000) + 300,
-      iss: 'https://' + settings.ACCESS_TEAM_DOMAIN,
-      sub: 'forged',
-    }),
-  );
+    ).rejects.toMatchObject({ status: 403 });
+  }
   await expect(
-    authenticateAccessPrincipal(req({ 'Cf-Access-Jwt-Assertion': pieces.join('.') }), settings),
-  ).rejects.toThrow(/signature/);
-  await expect(
-    authenticateAccessPrincipal(
-      req({ 'CF-Access-Client-Id': 'unverified', 'CF-Access-Client-Secret': 'unverified' }),
-      settings,
-    ),
-  ).rejects.toThrow(/required/);
-  expect((await app.fetch(req(), { ...env, ...settings })).status).toBe(401);
-});
-
-it('uses verified service identity in mutation audit and rejects production bypass configuration', async () => {
-  const { settings, token } = await signer();
-  const headers = {
-    host: 'localhost',
-    'content-type': 'application/json',
-    'Cf-Access-Jwt-Assertion': await token({ sub: '', common_name: 'automation.access' }),
-  };
-  const response = await app.fetch(
-    new Request('http://localhost/api/v1/locations', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ name: 'Machine created', slug: 'machine-' + crypto.randomUUID() }),
+    authenticateAccessPrincipal({
+      aud: 'test',
+      getIdentity: async () => {
+        throw new Error('unavailable');
+      },
     }),
-    { ...env, ...settings },
-  );
-  expect(response.status).toBe(201);
-  const row = (await response.json()) as { id: string };
-  const audit = await env.DB.prepare('SELECT actor FROM audit_log WHERE entity_id=?')
-    .bind(row.id)
-    .first();
-  expect(audit?.actor).toBe('service:automation.access');
-  const denied = await app.fetch(req(), { ...env, ...settings, ALLOW_LOCAL_AUTH: 'true' });
-  expect(denied.status).toBe(503);
+  ).rejects.toMatchObject({ status: 403 });
 });
 
-it('fails closed when the signing key service is unavailable', async () => {
-  const { settings, token } = await signer();
-  vi.mocked(fetch).mockResolvedValue(new Response('unavailable', { status: 503 }));
-  const response = await app.fetch(req({ 'Cf-Access-Jwt-Assertion': await token() }), {
-    ...env,
-    ...settings,
-  });
-  expect(response.status).toBe(503);
-});
-
-it('caches keys, rejects unsupported algorithms and refreshes rotated keys after cooldown', async () => {
-  const { settings, token, jwk } = await signer();
-  const authenticate = async (jwt: string) =>
-    authenticateAccessPrincipal(req({ 'Cf-Access-Jwt-Assertion': jwt }), settings);
-  await authenticate(await token());
-  await authenticate(await token());
-  expect(fetch).toHaveBeenCalledTimes(1);
-  await expect(authenticate(await token({}, { alg: 'HS256' }))).rejects.toThrow();
-  const rotated = await token({}, { kid: 'rotated-key' });
-  vi.mocked(fetch).mockResolvedValue(Response.json({ keys: [{ ...jwk, kid: 'rotated-key' }] }));
-  await expect(authenticate(rotated)).rejects.toThrow();
-  const now = Date.now();
-  vi.spyOn(Date, 'now').mockReturnValue(now + 31_000);
-  expect((await authenticate(rotated)).identity).toBe('access:human-subject');
-  expect(fetch).toHaveBeenCalledTimes(2);
+it('persists canonical human and service actors through the application audit path', async () => {
+  for (const [identity, actor] of [
+    [humanIdentity, 'access:' + humanIdentity.user_uuid],
+    [{ service_token_status: true, service_token_id: 'machine-id' }, 'service:machine-id'],
+  ] as const) {
+    const context = fakeAccessContext(identity);
+    const response = await app.fetch(
+      new Request('https://registry.example/api/v1/locations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Audit actor', slug: crypto.randomUUID() }),
+      }),
+      env,
+      context,
+    );
+    expect(response.status).toBe(201);
+    const row = (await response.json()) as { id: string };
+    const audit = await env.DB.prepare('SELECT actor FROM audit_log WHERE entity_id = ?')
+      .bind(row.id)
+      .all();
+    expect(audit.results).toEqual([{ actor }]);
+    for (const path of [
+      '/',
+      '/docs',
+      '/openapi.json',
+      '/api/v1/locations',
+      '/assets/app.js',
+      '/assets/app.css',
+    ]) {
+      expect(
+        (await app.fetch(new Request('https://registry.example' + path), env, context)).status,
+      ).toBe(200);
+    }
+  }
 });

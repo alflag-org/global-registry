@@ -47,43 +47,18 @@ const errorBox = (error) => {
   box.textContent = error.message || String(error);
 };
 async function request(path, options = {}) {
-  const secret = sessionStorage.getItem('registry-local-secret');
   const headers = {
     Accept: 'application/json',
-    ...(secret ? { 'x-global-registry-dev-secret': secret } : {}),
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...options.headers,
   };
   const response = await fetch(path, { ...options, headers, credentials: 'same-origin' });
-  if (response.status === 401) {
-    const err = new Error(
-      'Authentication required. Production users must sign in through Cloudflare Access.',
-    );
-    if (
-      location.hostname === 'localhost' ||
-      location.hostname === '127.0.0.1' ||
-      location.hostname === '[::1]'
-    )
-      document.getElementById('auth').showModal();
-    throw err;
-  }
   if (!response.ok) {
     const data = await response.json().catch(() => ({ message: 'Request failed.' }));
     throw new Error(data.message);
   }
   return response.status === 204 ? null : response.json();
 }
-document.getElementById('auth-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  sessionStorage.setItem('registry-local-secret', new FormData(event.target).get('secret'));
-  try {
-    spec = await request('/openapi.json');
-    document.getElementById('auth').close();
-    await render();
-  } catch (error) {
-    document.getElementById('auth-error').textContent = error.message;
-  }
-});
 function resolve(schema) {
   return schema && schema.$ref
     ? resolve(

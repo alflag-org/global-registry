@@ -5,7 +5,7 @@ Global Registry is a source of truth for infrastructure inventory and IPAM. The 
 ## Code responsibilities
 
 - `src/api`: runtime Zod validation, OpenAPI route declarations, HTTP errors, and browser request protections.
-- `src/auth`: Access JWT signature/issuer/audience/time validation and the separate local authentication boundary.
+- `src/auth`: runtime-provided Cloudflare Access context to canonical audit principal adapter. Local development uses Wrangler Access simulation.
 - `src/db`: explicit entity SQL, related detail queries, and atomic audit/mutation batches.
 - `src/ipam`: IP parsing, canonicalization, range arithmetic, and allocation.
 - `src/ui`: a same-origin browser client; forms consume the generated OpenAPI input schemas.
@@ -40,6 +40,6 @@ A Prefix containing IP rows cannot be deleted. A VLAN referenced by a Prefix can
 
 ## API and UI
 
-List endpoints return `{ "items": [], "total": 0 }`. `limit` defaults to 50 and is capped at 200; `offset` defaults to zero. Lists use creation time and ID for deterministic ordering. Applicable filters and strict request bodies are defined alongside route registration and appear in OpenAPI. Errors consistently contain `code` and `message`: 400 for invalid requests, 401/403 for authentication/origin rejection, 404 for missing entities, and 409 for uniqueness, relationship, or concurrency conflicts.
+List endpoints return `{ "items": [], "total": 0 }`. `limit` defaults to 50 and is capped at 200; `offset` defaults to zero. Lists use creation time and ID for deterministic ordering. Applicable filters and strict request bodies are defined alongside route registration and appear in OpenAPI. Errors consistently contain `code` and `message`: 400 for invalid requests, 403 for authentication/origin rejection, 404 for missing entities, and 409 for uniqueness, relationship, or concurrency conflicts.
 
 The UI uses the REST API, including for relationship selections and all writes. Device, VM, and Prefix details show related records. No free IP rows are generated for display. Security headers disallow framing and restrict scripts, styles, and connections to the same origin. Browser mutations reject cross-origin requests; non-browser clients need no Origin header.
