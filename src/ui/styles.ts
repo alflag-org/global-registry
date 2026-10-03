@@ -248,18 +248,6 @@ pre {
 .muted {
   color: #545b64;
 }
-dialog {
-  max-width: 500px;
-  border: 1px solid #aab7b8;
-  border-radius: 6px;
-  padding: 26px;
-}
-dialog::backdrop {
-  background: #232f3e88;
-}
-dialog button {
-  margin-top: 15px;
-}
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

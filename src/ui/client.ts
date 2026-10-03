@@ -181,8 +181,6 @@ const messages = {
     none: '— None —',
     confirmDelete:
       'Delete this record? Dependent allocations are retained; required relationships may prevent deletion.',
-    authRequired:
-      'Authentication required. Production users must sign in through Cloudflare Access.',
     requestFailed: 'Request failed.',
     notFound: 'Page not found.',
     homeTitle: 'Infrastructure inventory',
@@ -191,11 +189,6 @@ const messages = {
     sectionNetwork: 'Network',
     sectionActivity: 'Activity',
     apiDocs: 'API documentation',
-    authTitle: 'Local development access',
-    authHelp:
-      'Enter LOCAL_AUTH_SECRET from your local .dev.vars file. It is kept in this browser tab only.',
-    authSecret: 'Local secret',
-    authContinue: 'Continue',
   },
   ja: {
     loading: '読み込み中…',
@@ -220,7 +213,6 @@ const messages = {
     none: '— なし —',
     confirmDelete:
       'このレコードを削除しますか？依存する割り当ては保持されますが、必須の関連付けがある場合は削除できません。',
-    authRequired: '認証が必要です。本番環境では Cloudflare Access 経由でサインインしてください。',
     requestFailed: 'リクエストに失敗しました。',
     notFound: 'ページが見つかりません。',
     homeTitle: 'ダッシュボード',
@@ -229,11 +221,6 @@ const messages = {
     sectionNetwork: 'ネットワーク',
     sectionActivity: 'アクティビティ',
     apiDocs: 'API ドキュメント',
-    authTitle: 'ローカル開発アクセス',
-    authHelp:
-      '.dev.vars の LOCAL_AUTH_SECRET を入力してください。このブラウザタブ内でのみ保持されます。',
-    authSecret: 'ローカルシークレット',
-    authContinue: '続行',
   },
 };
 const t = (key, ...args) => {
@@ -290,41 +277,18 @@ const errorBox = (error) => {
   box.textContent = error.message || String(error);
 };
 async function request(path, options = {}) {
-  const secret = sessionStorage.getItem('registry-local-secret');
   const headers = {
     Accept: 'application/json',
-    ...(secret ? { 'x-global-registry-dev-secret': secret } : {}),
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...options.headers,
   };
   const response = await fetch(path, { ...options, headers, credentials: 'same-origin' });
-  if (response.status === 401) {
-    const err = new Error(t('authRequired'));
-    if (
-      location.hostname === 'localhost' ||
-      location.hostname === '127.0.0.1' ||
-      location.hostname === '[::1]'
-    )
-      document.getElementById('auth').showModal();
-    throw err;
-  }
   if (!response.ok) {
     const data = await response.json().catch(() => ({ message: t('requestFailed') }));
     throw new Error(data.message);
   }
   return response.status === 204 ? null : response.json();
 }
-document.getElementById('auth-form').addEventListener('submit', async (event) => {
-  event.preventDefault();
-  sessionStorage.setItem('registry-local-secret', new FormData(event.target).get('secret'));
-  try {
-    spec = await request('/openapi.json');
-    document.getElementById('auth').close();
-    await render();
-  } catch (error) {
-    document.getElementById('auth-error').textContent = error.message;
-  }
-});
 function resolve(schema) {
   return schema && schema.$ref
     ? resolve(

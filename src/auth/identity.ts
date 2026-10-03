@@ -34,8 +34,3 @@ export const canonicalActorIdentitySchema = z
       });
     }
   });
-
-export function principalTypeFromIdentity(identity: string): PrincipalType {
-  const canonicalIdentity = canonicalActorIdentitySchema.parse(identity);
-  return canonicalIdentity.startsWith('service:') ? 'service' : 'human';
-}

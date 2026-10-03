@@ -1,6 +1,6 @@
 export class GlobalRegistryError extends Error {
   constructor(
-    public readonly status: 400 | 401 | 403 | 404 | 409 | 503,
+    public readonly status: 400 | 403 | 404 | 409,
     public readonly code: string,
     message: string,
   ) {
@@ -9,7 +9,7 @@ export class GlobalRegistryError extends Error {
 }
 export class AuthorizationError extends GlobalRegistryError {
   constructor(code: 'access_required' | 'cross_site_mutation' | 'forbidden', message: string) {
-    super(code === 'access_required' ? 401 : 403, code, message);
+    super(403, code, message);
   }
 }
 export const invalid = (message: string) =>

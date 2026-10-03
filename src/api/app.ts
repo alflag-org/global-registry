@@ -56,16 +56,7 @@ app.use(
   }),
 );
 app.use('*', async (c, next) => {
-  const isShell =
-    c.req.method === 'GET' && !c.req.path.startsWith('/api/') && c.req.path !== '/openapi.json';
-  let request = c.req.raw;
-  if (isShell && c.env.ENVIRONMENT === 'development' && c.env.ALLOW_LOCAL_AUTH === 'true') {
-    // The development shell contains no inventory or secrets. Data requests still require the local secret.
-    const headers = new Headers(request.headers);
-    headers.set('x-global-registry-dev-secret', c.env.LOCAL_AUTH_SECRET);
-    request = new Request(request, { headers });
-  }
-  c.set('actor', (await authenticateAccessPrincipal(request, c.env)).identity);
+  c.set('actor', (await authenticateAccessPrincipal(c.executionCtx.access)).identity);
   if (['POST', 'PATCH', 'DELETE', 'PUT'].includes(c.req.method)) {
     const origin = c.req.header('origin');
     if (
@@ -91,7 +82,7 @@ app.doc31('/openapi.json', {
     title: 'Global Registry API',
     version: '1.0.0',
     description:
-      'Infrastructure inventory and IPAM. All routes require a verified Cloudflare Access application JWT. Service clients authenticate to Access with Service Token headers.',
+      'Infrastructure inventory and IPAM. Cloudflare Access authenticates before Worker invocation. All routes require runtime-provided ctx.access. Service clients authenticate to Access with Service Token headers; the Worker does not verify client credentials.',
   },
   security: [{ AccessClientId: [], AccessClientSecret: [] }, { AccessSession: [] }],
 });
@@ -113,7 +104,7 @@ app.openAPIRegistry.registerComponent('securitySchemes', 'AccessSession', {
   in: 'cookie',
   name: 'CF_Authorization',
   description:
-    'Browser session established by signing in through Cloudflare Access. Access injects the origin-facing Cf-Access-Jwt-Assertion header; clients do not generate that header.',
+    'Browser session established by signing in through Cloudflare Access. Access supplies the authenticated Worker invocation with ctx.access.',
 });
 app.get('/assets/app.js', (c) =>
   c.body(client, 200, { 'Content-Type': 'text/javascript; charset=utf-8' }),

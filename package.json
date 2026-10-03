@@ -10,7 +10,7 @@
     "pnpm": "11.12.0"
   },
   "scripts": {
-    "dev": "wrangler dev --local --env development --ip 127.0.0.1",
+    "dev": "wrangler dev --local --ip 127.0.0.1",
     "types": "wrangler types",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test scripts",
@@ -20,16 +20,17 @@
     "test:browser": "tsx scripts/browser-smoke.ts",
     "browser:install": "playwright install chromium",
     "check": "pnpm types && pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
-    "build": "pnpm check",
-    "db:migrate:local": "wrangler d1 migrations apply DB --local --env development",
-    "deploy:dry-run:local": "wrangler deploy --dry-run --env development",
-    "smoke:local": "pnpm db:migrate:local && pnpm test:browser"
+    "build": "pnpm types && pnpm typecheck",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "deploy:dry-run:local": "wrangler deploy --dry-run",
+    "smoke:local": "pnpm db:migrate:local && pnpm test:browser",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy": "pnpm db:migrate:remote && wrangler deploy"
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",
     "hono": "^4.13.8",
     "ipaddr.js": "2.5.0",
-    "jose": "^6.2.12",
     "swagger-ui-dist": "5.32.15",
     "zod": "^4.6.5"
   },
@@ -45,6 +46,6 @@
     "typescript-eslint": "^8.70.0",
     "vite": "8.2.0",
     "vitest": "^4.1.11",
-    "wrangler": "^4.118.0"
+    "wrangler": "^4.146.0"
   }
 }

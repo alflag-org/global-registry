@@ -1,35 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import ts from 'typescript';
 const root = process.cwd();
 const directory = await mkdtemp(path.join(tmpdir(), 'registry-browser-'));
-const secret = randomBytes(32).toString('hex');
-const parsed = ts.parseConfigFileTextToJson(
-  'wrangler.jsonc',
-  await readFile(path.join(root, 'wrangler.jsonc'), 'utf8'),
-);
-assert(!parsed.error, 'Invalid Wrangler configuration.');
-const config = parsed.config;
-config.main = path.join(root, 'src/index.ts');
-config.env.development.vars.LOCAL_AUTH_SECRET = secret;
-config.env.development.d1_databases[0].migrations_dir = path.join(root, 'migrations');
-const configPath = path.join(directory, 'wrangler.json');
-await writeFile(configPath, JSON.stringify(config), { mode: 0o600 });
 const wrangler = path.join(root, 'node_modules/wrangler/bin/wrangler.js');
-const common = [
-  '--config',
-  configPath,
-  '--env',
-  'development',
-  '--persist-to',
-  path.join(directory, 'state'),
-];
+const common = ['--persist-to', path.join(directory, 'state')];
 let worker: ChildProcess | undefined;
 let output = '';
 async function command(args: string[]) {
@@ -88,9 +67,6 @@ try {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(base);
-    await page.getByRole('dialog').waitFor();
-    await page.locator('[name="secret"]').fill(secret);
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.getByRole('heading', { name: 'Infrastructure inventory', exact: true }).waitFor();
     async function create(entity: string, fields: Record<string, string>) {
       await page.goto(base + '/' + entity + '/new');
@@ -176,9 +152,7 @@ try {
     await page.goto(base + '/interfaces/' + nic);
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await page.waitForURL(base + '/interfaces');
-    const response = await fetch(base + '/api/v1/ip-addresses/' + ip, {
-      headers: { 'x-global-registry-dev-secret': secret },
-    });
+    const response = await fetch(base + '/api/v1/ip-addresses/' + ip);
     const record = (await response.json()) as { interface_id: string | null };
     assert.equal(record.interface_id, null);
     await page.goto(base + '/ip-addresses/' + ip);
@@ -199,7 +173,6 @@ try {
       const response = await fetch(base + '/api/v1/' + entity, {
         method,
         headers: {
-          'x-global-registry-dev-secret': secret,
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...extraHeaders,
         },
@@ -245,7 +218,6 @@ try {
     ]) {
       await edit(entity!, id!);
     }
-    await http('locations', 'GET', undefined, 401, { 'x-global-registry-dev-secret': '' });
     await http('locations', 'POST', { name: 'Rejected', slug: 'rejected' }, 403, {
       origin: 'https://other.example',
     });
@@ -311,6 +283,12 @@ try {
     await remove('vlans', vlan);
     await remove('locations', locationId);
     const audit = await http('audit-log?limit=200');
+    assert(audit.items.length > 0);
+    assert(
+      audit.items.every(
+        (row: { actor: string }) => row.actor === 'access:00000000-0000-4000-8000-000000000001',
+      ),
+    );
     for (const action of ['create', 'update', 'delete', 'allocate', 'release'])
       assert(
         audit.items.some((row: { action: string }) => row.action === action),

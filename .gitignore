@@ -24,7 +24,6 @@ global-registry-*.sql
 *.jsonl
 .dev.vars
 .dev.vars.*
-!.dev.vars.example
 .env
 .env.*
 !.env.example

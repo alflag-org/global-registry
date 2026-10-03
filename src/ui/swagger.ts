@@ -15,13 +15,6 @@ window.addEventListener('load', () => {
     defaultModelsExpandDepth: -1,
     presets: [SwaggerUIBundle.presets.apis],
     layout: 'BaseLayout',
-    // Local development: reuse the secret stored by the shell's auth dialog.
-    // In production the Cloudflare Access session authorizes these requests.
-    requestInterceptor: (req) => {
-      const secret = sessionStorage.getItem('registry-local-secret');
-      if (secret) req.headers['x-global-registry-dev-secret'] = secret;
-      return req;
-    },
   });
 });
 `;

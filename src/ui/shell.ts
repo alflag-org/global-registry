@@ -33,20 +33,6 @@ export const shell = String.raw`
       >
     </aside>
     <main id="main"><p role="status" data-i18n="loading">Loading…</p></main>
-    <dialog id="auth">
-      <form id="auth-form">
-        <h2 data-i18n="authTitle">Local development access</h2>
-        <p data-i18n="authHelp">
-          Enter LOCAL_AUTH_SECRET from your local .dev.vars file. It is kept in this browser tab
-          only.
-        </p>
-        <label
-          ><span data-i18n="authSecret">Local secret</span
-          ><input name="secret" type="password" required autocomplete="off" /></label
-        ><button data-i18n="authContinue">Continue</button>
-        <p id="auth-error" role="alert"></p>
-      </form>
-    </dialog>
     <noscript>JavaScript is required for this interface. The REST API is also available.</noscript>
   </body>
 </html>

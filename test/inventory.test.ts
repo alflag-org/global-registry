@@ -39,7 +39,9 @@ describe('inventory and audit', () => {
     const mutation = records.find((r) => r.action === 'update')!;
     expect(JSON.parse(String(mutation.before_json)).host_device_id).toBe(host.id);
     expect(JSON.parse(String(mutation.after_json)).host_device_id).toBe(second.id);
-    expect(records.every((r) => r.actor === 'access:local-developer')).toBe(true);
+    expect(records.every((r) => r.actor === 'access:00000000-0000-4000-8000-000000000001')).toBe(
+      true,
+    );
   });
   it('rejects incomplete or duplicate source identities and permits distinct scopes', async () => {
     const l = await location();

@@ -11,29 +11,26 @@
   ],
   "compatibility_date": "2026-07-08",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": false,
+  "workers_dev": true,
   "preview_urls": false,
-  "vars": {
-    "ENVIRONMENT": "production",
-    "ALLOW_LOCAL_AUTH": "false",
-    "ACCESS_TEAM_DOMAIN": "unset",
-    "ACCESS_AUD": "unset",
-    "LOCAL_AUTH_SECRET": "unset",
-    "LOCAL_ACTOR_IDENTITY": "unset",
-  },
-  "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
-  "observability": { "enabled": true },
-  "env": {
-    "development": {
-      "vars": {
-        "ENVIRONMENT": "development",
-        "ALLOW_LOCAL_AUTH": "true",
-        "ACCESS_TEAM_DOMAIN": "unset",
-        "ACCESS_AUD": "unset",
-        "LOCAL_AUTH_SECRET": "unset",
-        "LOCAL_ACTOR_IDENTITY": "access:local-developer",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "global-registry-db",
+      // Template-only identifier; Deploy to Cloudflare replaces it in the user's repository.
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "access": {
+    "dev": {
+      "aud": "global-registry-local",
+      "identity": {
+        "email": "developer@example.invalid",
+        "user_uuid": "00000000-0000-4000-8000-000000000001",
+        "service_token_status": false,
       },
-      "d1_databases": [{ "binding": "DB", "migrations_dir": "migrations" }],
     },
   },
+  "observability": { "enabled": true },
 }

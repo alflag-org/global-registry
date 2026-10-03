@@ -1,3 +1,4 @@
+import { fakeAccessContext } from './access-context';
 import { env } from 'cloudflare:workers';
 import { expect } from 'vitest';
 import { app } from '../src/api/app';
@@ -13,13 +14,13 @@ export async function api(
       method,
       headers: {
         host: 'localhost',
-        'x-global-registry-dev-secret': env.LOCAL_AUTH_SECRET,
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
         ...headers,
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
     env,
+    fakeAccessContext(),
   );
 }
 export async function create(path: string, body: unknown): Promise<Row> {
