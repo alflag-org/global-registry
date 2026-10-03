@@ -1,8 +1,10 @@
 # Global Registry
 
-Global Registry is a self-hosted infrastructure inventory and IPAM application for Cloudflare. Deploy it with Deploy to Cloudflare, enable Cloudflare Access on the Worker, and use it.
+Global Registry is a self-hosted infrastructure inventory and IPAM application for Cloudflare Workers and D1.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/alflag-org/global-registry)
+
+For **Quick deployment**, evaluation, and temporary use. For **Long-term deployment**, [fork this repository](https://github.com/alflag-org/global-registry/fork) and connect the fork to Cloudflare Workers Builds to retain the upstream relationship and use GitHub’s **Sync fork**.
 
 ## What it does
 
@@ -23,7 +25,15 @@ One Cloudflare Worker serves the UI and REST API. D1 stores inventory and the au
 
 ## Installation
 
-Use **Deploy to Cloudflare** above. It creates your repository, provisions the Worker and D1 database, configures the `DB` binding, and sets up Workers Builds to run migrations before deployment. Accept the detected build and deploy commands. No CLI, application secrets, resource IDs, or custom domain are required.
+### Quick deployment
+
+Use **Deploy to Cloudflare** above to create an independent repository copy, Worker, D1 database, and Workers Builds connection. The copy has no GitHub fork relationship or **Sync fork**; upstream updates are your responsibility.
+
+### Long-term deployment
+
+Fork this repository, create `global-registry-db` in Cloudflare Dashboard, and connect the fork to Workers Builds. Use `pnpm build` and `pnpm deploy` as the build and deploy commands.
+
+Both paths use `pnpm deploy` to apply D1 migrations before publishing the Worker. See [Deployment](docs/deployment.md) for setup, build token permissions, and updates.
 
 Your application is available at `https://<worker>.<account>.workers.dev`. Until Access is enabled, **HTTP 403 is expected** on all application routes, including the UI, API, documentation, and assets.
 

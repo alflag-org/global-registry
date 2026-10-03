@@ -1,6 +1,6 @@
 # Backup and recovery
 
-Global Registry uses D1's native export and recovery mechanisms. The application has no backup scheduler, export endpoint, or object-storage dependency. Manage the database created by Deploy to Cloudflare in your Cloudflare account.
+Global Registry uses D1's native export and recovery mechanisms. The application has no backup scheduler, export endpoint, or object-storage dependency. Manage your deployment’s D1 database in your Cloudflare account.
 
 ## Backups
 
