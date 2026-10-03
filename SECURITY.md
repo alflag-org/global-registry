@@ -12,6 +12,14 @@ Audit identity uses `access:<user_uuid>` for people and `service:<service_token_
 
 Local development uses Wrangler's `access.dev` simulation and the same authentication code path as production. There is no application-managed local authentication or secret. Keep the simulated development server on loopback and do not expose it through a tunnel or proxy. Wrangler's development identity does not configure production Access.
 
+## Deployment credentials and resources
+
+Both installation methods use Worker-level Access with **All traffic**. The production setup disables preview builds; protecting production traffic does not establish a tested preview environment. Wrangler’s `preview_urls` setting and the Workers Builds preview switch control different features.
+
+Workers Builds API tokens authorize migrations and deployment; they are separate from the Access Service Tokens used by machine clients. Store build credentials in Cloudflare’s build configuration and client credentials in the client’s secret storage. Production resource IDs and Access configuration do not belong in the fork’s source tree. See [Deployment](docs/deployment.md) for setup and permission troubleshooting.
+
+D1 exports contain inventory and audit identities. Restrict access to exports and keep them outside the repository. Follow [Operations](docs/operations.md) when recovering data or assessing Worker/schema compatibility.
+
 ## Integrity
 
 D1 enforces foreign keys, unique identities, Interface ownership, VLAN location consistency, and IP membership through constraints and triggers. Application parsing canonicalizes network values. Database access is a privileged operational boundary; normal mutations use the API so validation and audit cannot be omitted.

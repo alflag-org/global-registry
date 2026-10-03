@@ -7,8 +7,8 @@ description: How to run and UI-test the Global Registry worker locally (dev auth
 
 ## Dev server
 
-- No system node: `export PATH=$HOME/.local/opt/node/bin:$PATH` (node + pnpm via corepack live there).
-- `pnpm dev` starts wrangler dev on `http://127.0.0.1:8787`. If an old `pnpm dev` is already running and may predate the commit under test, kill the wrangler/workerd processes and restart — stale workers serve stale code.
+- Use the tool versions pinned in `mise.toml`: `mise install --locked node npm:pnpm`, then `pnpm install --frozen-lockfile` and `pnpm types`. Use `mise exec -- pnpm <command>` if the shell is not using the pinned versions.
+- `pnpm dev` starts wrangler dev on `http://127.0.0.1:8787`. If an old `pnpm dev` is already running and may predate the commit under test, stop only the development process owned by the current task and restart — stale workers serve stale code.
 - `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8787/` should be 200.
 
 ## Access identity
@@ -24,7 +24,7 @@ description: How to run and UI-test the Global Registry worker locally (dev auth
 3. Detail `?edit` — PATCH form prefilled with existing values.
 4. Prefix detail `?allocate` — allocates lowest free IP, optional interface/dns binding; redirects to `/ip-addresses/{id}`.
 5. Device detail "Add interface" → `/interfaces/new?device_id=<id>` (presets the device select). Interface detail "Register IP address" presets `interface_id`.
-6. Delete button → `confirm()` dialog → DELETE; FK RESTRICT violations surface as error banner "A unique value or relationship conflicts with existing data." (409). Deleting a device cascades its interfaces; deleting a prefix/device detaches dependent IPs (audit `update`).
+6. Delete button → `confirm()` dialog → DELETE; FK RESTRICT violations surface as error banner "A unique value or relationship conflicts with existing data." (409). Deleting a Device deletes its Interfaces, clears VM host references, and detaches dependent IPs from those Interfaces (audit `update`). A Prefix containing registered IPs cannot be deleted; release its IPs first.
 7. `/audit-log` — filterable by entity_type/entity_id/actor/action; entity_type and action are selects; actions: create/update/delete/allocate/release.
 8. `/docs` — Swagger UI explorer backed by `/openapi.json`; assets served same-origin (`/assets/swagger-ui.*`), CSP relaxed only for style/img/font on that path. Local requests use Wrangler Access simulation; production requests use the Cloudflare Access session.
 
@@ -38,9 +38,9 @@ description: How to run and UI-test the Global Registry worker locally (dev auth
 
 ## Useful assertions
 
-- Security: `curl -sI /` should show CSP `default-src 'none'`, `Referrer-Policy: no-referrer`, `X-Frame-Options: SAMEORIGIN`, `Cache-Control: no-store`. POST with non-JSON content-type → 400 `Use application/json.`; cross-site Origin → 403 `cross_site_mutation`; malformed JSON → 400 (not 500).
+- Security: `curl -sI /` should show CSP `default-src 'none'` and `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `X-Frame-Options: SAMEORIGIN`, `Cache-Control: no-store`. POST with non-JSON content-type → 400 `Use application/json.`; cross-site Origin → 403 `cross_site_mutation`; malformed JSON → 400 (not 500).
 - Update guard: editing a prefix CIDR to exclude an allocated IP → 400 "Prefix must contain every registered IP address."
 
-## Devin Secrets Needed
+## Local secrets
 
 - none (Wrangler simulates the Access identity)
