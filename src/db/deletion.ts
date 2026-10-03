@@ -1,41 +1,7 @@
 import { missing } from '../api/errors';
 import { auditStatement, batch, snapshot } from './mutations';
+import { interfaceColumns, ipColumns, vmColumns } from './columns';
 import type { Table } from './types';
-const interfaceColumns = [
-  'id',
-  'device_id',
-  'virtual_machine_id',
-  'name',
-  'mac_address',
-  'description',
-  'created_at',
-  'updated_at',
-];
-const ipColumns = [
-  'id',
-  'prefix_id',
-  'interface_id',
-  'address',
-  'status',
-  'dns_name',
-  'description',
-  'created_at',
-  'updated_at',
-];
-const vmColumns = [
-  'id',
-  'name',
-  'host_device_id',
-  'vcpu',
-  'memory_mb',
-  'disk_mb',
-  'source',
-  'source_scope',
-  'source_id',
-  'description',
-  'created_at',
-  'updated_at',
-];
 // Explicitly audit dependent mutations before the parent is deleted, in the same D1 batch.
 export async function deleteInventory(
   db: D1Database,
@@ -46,7 +12,7 @@ export async function deleteInventory(
 ) {
   const statements: D1PreparedStatement[] = [];
   const now = new Date().toISOString();
-  const detach = (target: Table, cols: string[], field: string, where: string) => {
+  const detach = (target: Table, cols: readonly string[], field: string, where: string) => {
     statements.push(
       auditStatement(
         db,

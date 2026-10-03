@@ -15,6 +15,9 @@ it('rejects missing runtime Access even when authentication headers are supplied
     '/openapi.json',
     '/assets/app.js',
     '/assets/app.css',
+    '/assets/swagger-ui.js',
+    '/assets/swagger-ui.css',
+    '/assets/swagger-init.js',
     '/missing',
   ]) {
     for (const headers of [
@@ -126,6 +129,9 @@ it('persists canonical human and service actors through the application audit pa
       '/api/v1/locations',
       '/assets/app.js',
       '/assets/app.css',
+      '/assets/swagger-ui.js',
+      '/assets/swagger-ui.css',
+      '/assets/swagger-init.js',
     ]) {
       expect(
         (await app.fetch(new Request('https://registry.example' + path), env, context)).status,

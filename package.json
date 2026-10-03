@@ -28,21 +28,22 @@
     "deploy": "pnpm db:migrate:remote && wrangler deploy"
   },
   "dependencies": {
-    "@hono/zod-openapi": "^1.4.0",
+    "@hono/zod-openapi": "^1.6.3",
     "hono": "^4.13.8",
     "ipaddr.js": "2.5.0",
-    "zod": "^4.4.3"
+    "swagger-ui-dist": "5.32.15",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.1",
     "eslint": "^10.8.0",
-    "playwright": "1.62.1",
+    "playwright": "1.63.0",
     "prettier": "^3.9.5",
     "tsx": "^4.23.0",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.66.0",
+    "typescript-eslint": "^8.70.0",
     "vite": "8.2.0",
     "vitest": "^4.1.11",
     "wrangler": "^4.146.0"
