@@ -258,6 +258,15 @@ try {
       '10.42.0.18',
       '10.42.0.19',
     ]);
+    await page.goto(base + '/prefixes/' + prefix + '?related_limit=1');
+    await page.getByRole('link', { name: '10.42.0.10', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Next', exact: true }).click();
+    await page.waitForURL(base + '/prefixes/' + prefix + '?related_limit=1&related_offset=1');
+    await page.getByRole('link', { name: '10.42.0.16', exact: true }).waitFor();
+    assert.equal(await page.getByRole('link', { name: '10.42.0.10', exact: true }).count(), 0);
+    await page.getByRole('link', { name: 'Previous', exact: true }).click();
+    await page.waitForURL(base + '/prefixes/' + prefix + '?related_limit=1&related_offset=0');
+    await page.getByRole('link', { name: '10.42.0.10', exact: true }).waitFor();
     const ipv6 = await create('prefixes', { location_id: locationId, cidr: '2001:0db8:42::1/126' });
     const reserved6 = await create('ip-addresses', {
       prefix_id: ipv6,

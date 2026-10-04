@@ -172,6 +172,7 @@ const messages = {
     records: (n) => n + ' records',
     previous: 'Previous',
     next: 'Next',
+    relatedPage: (n) => 'Related records — page ' + n,
     noRecords: 'No records.',
     create: (s) => 'Create ' + s,
     createRecord: 'Create record',
@@ -204,6 +205,7 @@ const messages = {
     records: (n) => n + ' 件',
     previous: '前へ',
     next: '次へ',
+    relatedPage: (n) => '関連レコード — ' + n + ' ページ目',
     noRecords: 'レコードがありません。',
     create: (s) => s + ' を作成',
     createRecord: '作成',
@@ -531,7 +533,11 @@ async function listPage(path) {
   main.append(pager);
 }
 async function detailPage(path, id) {
-  const row = await request('/api/v1/' + path + '/' + id);
+  const params = new URLSearchParams(location.search);
+  const query = new URLSearchParams();
+  for (const key of ['related_limit', 'related_offset'])
+    if (params.has(key)) query.set(key, params.get(key));
+  const row = await request('/api/v1/' + path + '/' + id + '?' + query.toString());
   main.querySelector('h1').textContent = display(row);
   if (new URLSearchParams(location.search).has('edit') && path !== 'audit-log')
     return editor(path, row);
@@ -594,6 +600,20 @@ async function detailPage(path, id) {
     if (row[key]) {
       main.append(el('h2', title(key)), table(target, row[key]));
     }
+  if (row.related_page) {
+    const { limit, offset, has_more } = row.related_page;
+    main.append(el('p', t('relatedPage', Math.floor(offset / limit) + 1), { class: 'muted' }));
+    const pager = el('div', undefined, { class: 'actions' });
+    for (const [label, target] of [
+      ...(offset > 0 ? [['previous', Math.max(0, offset - limit)]] : []),
+      ...(Object.values(has_more).some(Boolean) && offset + limit <= 1000000 ? [['next', offset + limit]] : []),
+    ]) {
+      const next = new URLSearchParams(query);
+      next.set('related_offset', target);
+      pager.append(link(t(label), '?' + next.toString(), 'button secondary'));
+    }
+    main.append(pager);
+  }
 }
 async function render() {
   if (!spec) spec = await request('/openapi.json');

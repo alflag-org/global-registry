@@ -28,13 +28,14 @@ interface Resource {
   deleteVerb: string;
   query: z.ZodObject<z.ZodRawShape>;
   output: z.ZodType;
-  detail?: { schema: z.ZodType; get: (db: D1Database, id: string) => Promise<unknown> };
+  detail?: {
+    schema: z.ZodType;
+    get: (db: D1Database, id: string, query: s.RelatedQuery) => Promise<unknown>;
+  };
 }
 function registerResource(app: OpenAPIHono<ApiEnvironment>, resource: Resource) {
   const { entity, path, tag, name, deleteVerb, query, output } = resource;
   const base = `/api/v1/${path}`;
-  const getOne =
-    resource.detail?.get ?? ((db: D1Database, id: string) => q.getEntity(entity, db, id));
   const detailSchema = resource.detail?.schema ?? output;
   app.openapi(
     createRoute({
@@ -62,10 +63,22 @@ function registerResource(app: OpenAPIHono<ApiEnvironment>, resource: Resource) 
       path: `${base}/{id}`,
       tags: [tag],
       summary: `Get ${name} detail`,
-      request: { params: s.params },
+      request: { params: s.params, query: resource.detail ? s.relatedQuery : z.object({}) },
       responses: { 200: json(detailSchema), ...errors },
     }),
-    async (c) => c.json(detailSchema.parse(await getOne(c.env.DB, c.req.valid('param').id)), 200),
+    async (c) =>
+      c.json(
+        detailSchema.parse(
+          await (resource.detail
+            ? resource.detail.get(
+                c.env.DB,
+                c.req.valid('param').id,
+                s.relatedQuery.parse(c.req.valid('query')),
+              )
+            : q.getEntity(entity, c.env.DB, c.req.valid('param').id)),
+        ),
+        200,
+      ),
   );
   app.openapi(
     createRoute({

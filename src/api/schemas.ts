@@ -140,27 +140,59 @@ export const ip = ipInput
   .required()
   .extend({ ...timestamps, address: z.string() })
   .openapi('IPAddress');
+export const relatedQuery = z
+  .object({
+    related_limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(200)
+      .default(50)
+      .describe('Maximum records per related collection.'),
+    related_offset: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(1_000_000)
+      .default(0)
+      .describe('Offset applied independently to every related collection.'),
+  })
+  .strict();
+export type RelatedQuery = z.infer<typeof relatedQuery>;
+const relatedPage = (collections: z.ZodRawShape) =>
+  z.object({
+    limit: z.number().int().min(1).max(200),
+    offset: z.number().int().min(0).max(1_000_000),
+    has_more: z.object(collections),
+  });
 export const deviceDetail = device
   .extend({
-    interfaces: z.array(networkInterface),
-    ip_addresses: z.array(ip),
-    virtual_machines: z.array(vm),
+    interfaces: z.array(networkInterface).max(200),
+    ip_addresses: z.array(ip).max(200),
+    virtual_machines: z.array(vm).max(200),
+    related_page: relatedPage({
+      interfaces: z.boolean(),
+      ip_addresses: z.boolean(),
+      virtual_machines: z.boolean(),
+    }),
   })
   .openapi('DeviceDetail');
 export const vmDetail = vm
   .extend({
     host_device: device.nullable(),
     location: location.nullable(),
-    interfaces: z.array(networkInterface),
-    ip_addresses: z.array(ip),
+    interfaces: z.array(networkInterface).max(200),
+    ip_addresses: z.array(ip).max(200),
+    related_page: relatedPage({ interfaces: z.boolean(), ip_addresses: z.boolean() }),
   })
   .openapi('VirtualMachineDetail');
 export const prefixDetail = networkPrefix
   .extend({
     location,
     vlan: vlan.nullable(),
-    ip_addresses: z.array(ip),
-    more_specific_prefixes: z.array(networkPrefix),
+    ip_addresses: z.array(ip).max(200),
+    more_specific_prefixes: z.array(networkPrefix).max(200),
+    related_page: relatedPage({ ip_addresses: z.boolean(), more_specific_prefixes: z.boolean() }),
   })
   .openapi('PrefixDetail');
 export const auditId = z.string().regex(/^[0-9a-f-]{36}:[0-9a-f-]{36}$/);

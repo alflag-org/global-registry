@@ -6,6 +6,7 @@ import { auditStatement, snapshot, assertChanged } from '../db/mutations';
 import type { Row } from '../db/types';
 import { reference } from '../db/relationships';
 import { address, firstAvailable, prefix } from './address';
+const exclusionLimit = 1000;
 export async function allocate(
   db: D1Database,
   actor: string,
@@ -19,26 +20,38 @@ export async function allocate(
     const [used, children] = await db.batch<Record<string, string>>([
       db
         .prepare(
-          'SELECT address_key FROM ip_addresses WHERE family=? AND address_key BETWEEN ? AND ?',
+          'SELECT address_key FROM ip_addresses WHERE family=? AND address_key BETWEEN ? AND ? ORDER BY address_key LIMIT ?',
         )
-        .bind(p.family, p.range_start, p.range_end),
+        .bind(p.family, p.range_start, p.range_end, exclusionLimit + 1),
       db
         .prepare(
-          'SELECT range_start,range_end FROM prefixes WHERE family=? AND range_start>=? AND range_end<=? AND prefix_length>?',
+          'SELECT range_start,range_end FROM prefixes WHERE family=? AND range_start>=? AND range_end<=? AND prefix_length>? ORDER BY range_start,range_end DESC LIMIT ?',
         )
-        .bind(p.family, p.range_start, p.range_end, p.length),
+        .bind(p.family, p.range_start, p.range_end, p.length, exclusionLimit + 1),
     ]);
     const ranges = [
-      ...used!.results.map((r) => ({
+      ...used!.results.slice(0, exclusionLimit).map((r) => ({
         start: BigInt(`0x${r.address_key}`),
         end: BigInt(`0x${r.address_key}`),
       })),
-      ...children!.results.map((r) => ({
+      ...children!.results.slice(0, exclusionLimit).map((r) => ({
         start: BigInt(`0x${r.range_start}`),
         end: BigInt(`0x${r.range_end}`),
       })),
     ];
     const candidate = firstAvailable(p, ranges);
+    // Sorted lookahead bounds all unseen exclusions. Only an earlier gap is proven free.
+    const frontier = [
+      used!.results[exclusionLimit]?.address_key,
+      children!.results[exclusionLimit]?.range_start,
+    ].filter((value): value is string => value !== undefined);
+    if (
+      frontier.length &&
+      (!candidate || frontier.some((start) => address(candidate).key >= start))
+    )
+      throw conflict(
+        'Allocation work limit reached. Use a more-specific Prefix or register an explicit address.',
+      );
     if (!candidate) throw conflict('This Prefix has no available addresses.');
     const a = address(candidate);
     const now = new Date().toISOString();

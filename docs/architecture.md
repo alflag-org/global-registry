@@ -16,6 +16,10 @@ The UI uses the browser language unless `localStorage.registry-lang` contains `e
 
 IP addresses are globally unique and must remain inside their Prefix. Addresses and prefixes are normalized before storage. Allocation finds the lowest available address while excluding occupied addresses and more-specific prefixes, without enumerating the subnet.
 
+Device, VM, and Prefix detail responses page each related collection with `related_limit` (default 50, maximum 200) and `related_offset` (default 0, maximum 1,000,000). Existing array fields contain the requested page; `related_page` reports the effective limit, offset, and per-collection `has_more` flags. The same offset applies independently to every related collection. The UI provides previous/next related-record pages; API clients must page to retrieve complete collections. Each SQL query retrieves at most one extra row to determine whether another page exists, without counting all related rows.
+
+Each allocation attempt retrieves at most 1,001 ordered occupied addresses and 1,001 ordered descendant Prefix intervals, then processes at most 1,000 of each. The extra rows bound unseen exclusions: an earlier gap can still be allocated even in a large sparse inventory. If the lowest available address cannot be proved within this budget, allocation returns HTTP 409 without writing an address or audit record. Use a more-specific Prefix or register an explicit address in that case. The existing five-attempt concurrency limit and transactional exclusion/uniqueness checks remain in force. These bounds limit Worker result transfer and in-memory processing, not D1 query execution time.
+
 ## Data integrity and audit
 
 D1 constraints and triggers enforce relationships and uniqueness. Inventory changes and their audit records commit in the same database batch; a failure rolls back both. Updates reject concurrent overwrites.
