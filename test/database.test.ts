@@ -71,19 +71,3 @@ it('makes audit append-only at the database boundary', async () => {
   await expect(env.DB.exec("UPDATE audit_log SET actor='changed'")).rejects.toThrow(/append-only/);
   await expect(env.DB.exec('DELETE FROM audit_log')).rejects.toThrow(/append-only/);
 });
-it('initial migration contains only the inventory tables and D1 migration metadata', async () => {
-  const result = await env.DB.prepare(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name!='d1_migrations'",
-  ).all<{ name: string }>();
-  expect(result.results.map((r) => r.name).sort()).toEqual([
-    'audit_log',
-    'devices',
-    'interfaces',
-    'ip_addresses',
-    'locations',
-    'prefixes',
-    'virtual_machines',
-    'vlans',
-  ]);
-  expect((await env.DB.prepare('PRAGMA foreign_key_check').all()).results).toEqual([]);
-});

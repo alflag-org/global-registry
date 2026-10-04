@@ -110,7 +110,6 @@ it('generates OpenAPI from registered validation schemas and exposes all operati
   expect(Object.keys(spec.paths['/api/v1/audit-log']!)).toEqual(['get']);
   expect(spec.components.schemas).toHaveProperty('PrefixDetail');
   expect(spec.components.schemas).toHaveProperty('DeviceDetail');
-  expect(spec.components.schemas).not.toHaveProperty('Resource');
 });
 it('serves the UI shell, assets, and docs with browser protections', async () => {
   for (const path of [

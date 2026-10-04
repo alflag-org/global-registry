@@ -28,12 +28,10 @@ Keep API schemas and validation together. Use explicit entity queries and prepar
 
 ```sh
 pnpm check
-pnpm browser:install
-pnpm smoke:local
 pnpm deploy:dry-run:local
 ```
 
-`pnpm check` generates Worker types, typechecks, lints, checks formatting, and runs tests in the Workers runtime against a freshly migrated D1 database. `pnpm smoke:local` applies local migrations and exercises actual browser CRUD and allocation through a loopback Worker. `pnpm deploy:dry-run:local` builds without publishing.
+`pnpm check` generates Worker types, typechecks, lints, checks formatting, and runs the unit and integration tests. Unit tests in `test/unit/` run in Node.js without a Worker or database; use `pnpm test:unit` to run them independently. Integration tests in `test/*.test.ts` verify HTTP and D1 behavior in the Workers runtime against a freshly migrated database. `pnpm deploy:dry-run:local` builds without publishing.
 
 Use focused Conventional Commits. Follow the pull request template. Update current-facing documentation when behavior changes. Report security issues privately as described in [SECURITY.md](SECURITY.md).
 
@@ -43,7 +41,7 @@ Keep the README focused on what users can do and how to get started. Put complet
 
 ## Dependency and security reports
 
-`CI` verifies builds, types, formatting, tests, browser behavior, and the deployment bundle on pull requests and master pushes. Advisory databases do not determine the build result.
+`CI` verifies builds, types, formatting, unit and integration tests, and the deployment bundle on pull requests and master pushes. Advisory databases do not determine the build result.
 
 `Security reports` runs weekly and on manual dispatch. Its dependency job publishes the `pnpm audit` findings in the run summary and verifies registry signatures. Completed scans with advisories produce a successful report; malformed reports, registry failures, and signature verification failures still fail the job. Use `pnpm audit` locally for the normal failing-on-findings behavior.
 

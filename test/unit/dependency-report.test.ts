@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { dependencyReport } from '../scripts/dependency-report';
+import { dependencyReport } from '../../scripts/dependency-report';
 const counts = { info: 0, low: 0, moderate: 0, high: 0, critical: 0 };
 const report = (advisories: Record<string, unknown> = {}) =>
   JSON.stringify({

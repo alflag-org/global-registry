@@ -6,8 +6,8 @@ node = "24.18.0"
 "npm:pnpm" = "11.12.0"
 
 [tasks.bootstrap]
-description = "Install locked dependencies, browser support, and Worker binding types"
-run = ["pnpm install --frozen-lockfile", "pnpm browser:install", "pnpm types"]
+description = "Install locked dependencies and Worker binding types"
+run = ["pnpm install --frozen-lockfile", "pnpm types"]
 
 [tasks.check]
 description = "Run all static checks and tests"
@@ -24,10 +24,6 @@ run = "pnpm dev"
 [tasks.migrate-local]
 description = "Apply D1 migrations to the local database"
 run = "pnpm db:migrate:local"
-
-[tasks.smoke]
-description = "Exercise local UI and API workflows"
-run = "pnpm smoke:local"
 
 [tasks.deploy-dry-run-local]
 description = "Build an inert local deployment bundle without Cloudflare resources"

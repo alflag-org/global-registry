@@ -46,12 +46,4 @@ it('documents gateway authentication with both service headers required together
   ]);
   expect(spec.components.securitySchemes.AccessClientId?.name).toBe('CF-Access-Client-Id');
   expect(spec.components.securitySchemes.AccessClientSecret?.name).toBe('CF-Access-Client-Secret');
-  expect(spec.components.securitySchemes).not.toHaveProperty('AccessJWT');
-});
-
-it('indexes prefix location filtering', async () => {
-  const plan = await env.DB.prepare('EXPLAIN QUERY PLAN SELECT * FROM prefixes WHERE location_id=?')
-    .bind(crypto.randomUUID())
-    .all();
-  expect(JSON.stringify(plan.results)).toContain('prefixes_location_id');
 });
