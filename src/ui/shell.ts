@@ -1,6 +1,6 @@
 export const shell = String.raw`
 <!doctype html>
-<html lang="en">
+<html lang="en" data-i18n-pending>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />

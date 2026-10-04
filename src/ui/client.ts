@@ -1,9 +1,16 @@
 export const client = String.raw`
 'use strict';
 const main = document.getElementById('main');
-const storedLang = localStorage.getItem('registry-lang');
+let storedLang;
+try {
+  storedLang = localStorage.getItem('registry-lang');
+} catch {
+  // Browser storage can be unavailable; use the browser language instead.
+}
 const LANG =
-  storedLang || ((navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en');
+  storedLang === 'en' || storedLang === 'ja'
+    ? storedLang
+    : (navigator.language || '').toLowerCase().startsWith('ja') ? 'ja' : 'en';
 document.documentElement.lang = LANG;
 const entityNames = {
   en: {
@@ -239,7 +246,8 @@ for (const e of document.querySelectorAll('[data-i18n]')) {
   if (v) e.textContent = v;
 }
 const langSelect = document.getElementById('lang');
-langSelect.value = storedLang && messages[storedLang] ? storedLang : LANG;
+langSelect.value = LANG;
+document.documentElement.removeAttribute('data-i18n-pending');
 langSelect.addEventListener('change', () => {
   localStorage.setItem('registry-lang', langSelect.value);
   location.reload();

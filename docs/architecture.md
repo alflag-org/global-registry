@@ -2,6 +2,10 @@
 
 Cloudflare Access authenticates requests before they reach the Worker. The Worker serves the web UI and REST API; D1 stores inventory and audit history. The UI uses the same API as external clients.
 
+## UI language
+
+The UI uses the browser language unless `localStorage.registry-lang` contains `en` or `ja`. Invalid preferences and unavailable browser storage fall back to the browser language. Initial shell labels and the language selector remain hidden until the client applies that language, preserving their layout. The localized shell becomes visible before API data loads.
+
 ## Data model
 
 - Locations group Devices, VLANs, and Prefixes.

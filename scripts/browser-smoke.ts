@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createServer } from 'node:net';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
+import { checkInitialLanguage } from './browser-language';
 const root = process.cwd();
 const directory = await mkdtemp(path.join(tmpdir(), 'registry-browser-'));
 const wrangler = path.join(root, 'node_modules/wrangler/bin/wrangler.js');
@@ -63,6 +64,7 @@ try {
   assert(ready, 'Worker did not start: ' + output);
   const browser = await chromium.launch({ headless: true });
   try {
+    await checkInitialLanguage(browser, base);
     const page = await browser.newPage({ viewport: { width: 1360, height: 960 } });
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
@@ -306,7 +308,7 @@ try {
       assert.equal((await http(entity)).total, 0, entity);
     assert.deepEqual(errors, []);
     console.log(
-      'Browser smoke passed: all entity CRUD, IPv4/IPv6, concurrent allocation, reserved/child exclusions, deletion constraints, authentication, audit, and API docs.',
+      'Browser smoke passed: initial language rendering, all entity CRUD, IPv4/IPv6, concurrent allocation, reserved/child exclusions, deletion constraints, authentication, audit, and API docs.',
     );
   } finally {
     await browser.close();

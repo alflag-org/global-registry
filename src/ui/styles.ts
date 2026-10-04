@@ -8,6 +8,10 @@ export const styles = String.raw`
 * {
   box-sizing: border-box;
 }
+[data-i18n-pending] [data-i18n],
+[data-i18n-pending] .lang select {
+  visibility: hidden;
+}
 body {
   margin: 0;
   display: flex;
