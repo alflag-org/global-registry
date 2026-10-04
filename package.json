@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.6.3",
-    "hono": "^4.13.8",
+    "hono": "^4.13.11",
     "ipaddr.js": "2.5.0",
     "swagger-ui-dist": "5.32.15",
     "zod": "^4.6.5"
