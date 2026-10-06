@@ -14,10 +14,10 @@ importers:
     dependencies:
       '@hono/zod-openapi':
         specifier: ^1.6.3
-        version: 1.6.3(hono@4.13.11)(zod@4.6.5)
+        version: 1.6.3(hono@4.13.12)(zod@4.6.5)
       hono:
-        specifier: ^4.13.11
-        version: 4.13.11
+        specifier: ^4.13.12
+        version: 4.13.12
       ipaddr.js:
         specifier: 2.5.0
         version: 2.5.0
@@ -1118,8 +1118,8 @@ packages:
     resolution: {integrity: sha512-XxwI8EOhVQgWp6iDL+3b0r86f4d6AX6zSU55HfB4ydCEuXLXc5FcYeOu+nnGftS4TEju/11rt4KJPTMgbfmv4A==}
     engines: {node: '>=10.13.0'}
 
-  hono@4.13.11:
-    resolution: {integrity: sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==}
+  hono@4.13.12:
+    resolution: {integrity: sha512-6E2QDAc9Ick9Sq77ZrGS/dk2WUYni91aufTw6LJKpV7w8kW5/GxVUc650FOADOmlwg3K+f7Pun6XlV+pYmW6gw==}
     engines: {node: '>=16.9.0'}
 
   ignore@5.3.2:
@@ -1862,17 +1862,17 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@hono/zod-openapi@1.6.3(hono@4.13.11)(zod@4.6.5)':
+  '@hono/zod-openapi@1.6.3(hono@4.13.12)(zod@4.6.5)':
     dependencies:
       '@asteasolutions/zod-to-openapi': 9.1.0(zod@4.6.5)
-      '@hono/zod-validator': 0.9.1(hono@4.13.11)(zod@4.6.5)
-      hono: 4.13.11
+      '@hono/zod-validator': 0.9.1(hono@4.13.12)(zod@4.6.5)
+      hono: 4.13.12
       openapi3-ts: 4.6.0
       zod: 4.6.5
 
-  '@hono/zod-validator@0.9.1(hono@4.13.11)(zod@4.6.5)':
+  '@hono/zod-validator@0.9.1(hono@4.13.12)(zod@4.6.5)':
     dependencies:
-      hono: 4.13.11
+      hono: 4.13.12
       zod: 4.6.5
 
   '@humanfs/core@0.19.2':
@@ -2433,7 +2433,7 @@ snapshots:
     dependencies:
       is-glob: 4.0.3
 
-  hono@4.13.11: {}
+  hono@4.13.12: {}
 
   ignore@5.3.2: {}
 
